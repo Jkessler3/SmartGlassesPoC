@@ -15,7 +15,9 @@ CAM_READ_FAIL_LIMIT = 100
 CAM_READ_FAIL_SLEEP_S = 0.02
 SERIAL_PROBE_STARTUP_S = 0.35
 SERIAL_PROBE_WINDOW_S = 0.60
-SERIAL_STATUS_POLL_S = 2.0
+SERIAL_STATUS_POLL_S = 5.0
+SERIAL_INITIAL_STATUS_DELAY_S = 1.0
+SERIAL_STATUS_TIMEOUT_COOLDOWN_S = 5.0
 SERIAL_CONNECT_SETTLE_S = 0.35
 SERIAL_PORT_TIMEOUT_S = 0.10
 SERIAL_WRITE_TIMEOUT_S = 0.25
@@ -196,6 +198,8 @@ class App:
         self.ser_q = queue.Queue()
         self._last_status_poll = 0.0
         self._ser_write_timeout_count = 0
+        self._ser_has_rx = False
+        self._status_poll_blocked_until = 0.0
         self._suppress_brightness_send = False
 
         # Cameras
@@ -309,8 +313,9 @@ class App:
             )
             self.ser.dtr = False
             self.ser.rts = False
-            time.sleep(SERIAL_CONNECT_SETTLE_S)
             self.ser.reset_input_buffer()
+            self.ser.reset_output_buffer()
+            time.sleep(SERIAL_CONNECT_SETTLE_S)
         except Exception as e:
             messagebox.showerror(
                 "ESP32",
@@ -321,12 +326,14 @@ class App:
 
         self.ser_stop.clear()
         self._ser_write_timeout_count = 0
+        self._ser_has_rx = False
+        self._status_poll_blocked_until = time.monotonic() + SERIAL_INITIAL_STATUS_DELAY_S
         self.ser_thread = threading.Thread(target=self.serial_reader, daemon=True)
         self.ser_thread.start()
         self._last_status_poll = time.monotonic()
 
-        # ask for state after things settle
-        self.root.after(300, lambda: self.send_ser("STATUS?"))
+        # Ask for status only if the device has not already spoken up on boot.
+        self.root.after(int(SERIAL_INITIAL_STATUS_DELAY_S * 1000), self.request_initial_status)
 
         self.status.set(f"Connected {port}")
 
@@ -335,6 +342,8 @@ class App:
         ser = self.ser
         self.ser = None
         self._ser_write_timeout_count = 0
+        self._ser_has_rx = False
+        self._status_poll_blocked_until = 0.0
         if ser:
             try:
                 ser.close()
@@ -351,7 +360,11 @@ class App:
         if self.ser is ser:
             self.on_disconnect(status_text)
 
-    def send_ser(self, s: str):
+    def request_initial_status(self):
+        if self.ser and not self.ser_stop.is_set() and not self._ser_has_rx:
+            self.send_ser("STATUS?", count_timeout=False)
+
+    def send_ser(self, s: str, count_timeout=True):
         ser = self.ser
         if not ser:
             return False
@@ -363,12 +376,22 @@ class App:
             if self.ser is not ser or self.ser_stop.is_set():
                 return False
 
-            self._ser_write_timeout_count += 1
             try:
                 ser.reset_output_buffer()
             except Exception:
                 pass
 
+            if not count_timeout:
+                self._status_poll_blocked_until = time.monotonic() + SERIAL_STATUS_TIMEOUT_COOLDOWN_S
+                self.root.after(
+                    0,
+                    lambda cmd=s.strip(): self.status.set(
+                        f"ESP32 status poll timed out on {cmd}; will retry later"
+                    ),
+                )
+                return False
+
+            self._ser_write_timeout_count += 1
             if self._ser_write_timeout_count >= SERIAL_WRITE_TIMEOUT_LIMIT:
                 self.root.after(
                     0,
@@ -403,6 +426,8 @@ class App:
                     line = ser.readline().decode(errors="ignore").strip()
                     if line:
                         self._ser_write_timeout_count = 0
+                        self._ser_has_rx = True
+                        self._status_poll_blocked_until = 0.0
                         self.ser_q.put(("line", ser, line))
                 else:
                     time.sleep(0.01)
@@ -657,9 +682,14 @@ class App:
                 self.set_brightness_from_device(brightness)
 
         now = time.monotonic()
-        if self.ser and (now - self._last_status_poll) > SERIAL_STATUS_POLL_S:
+        if (
+            self.ser
+            and self._ser_has_rx
+            and now >= self._status_poll_blocked_until
+            and (now - self._last_status_poll) > SERIAL_STATUS_POLL_S
+        ):
             self._last_status_poll = now
-            self.send_ser("STATUS?")
+            self.send_ser("STATUS?", count_timeout=False)
 
         # display + record
         with self.world_lock:
