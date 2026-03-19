@@ -3,9 +3,10 @@
 // ---------------------------
 // Pinout
 // ---------------------------
-const int IR_PIN      = 1;  // GPIO1 -> MOSFET gate
-const int REC_LED_PIN = 4;  // GPIO4 -> red LED (+ resistor) -> GND
+const int IR_PIN      = 4;  // GPIO1 -> MOSFET gate
+const int REC_LED_PIN = 1;  // GPIO4 -> record LED
 const int BUTTON_PIN  = 2;  // GPIO2 -> button -> GND (INPUT_PULLUP)
+const bool REC_LED_ACTIVE_HIGH = true;  // Set true for GPIO -> resistor -> LED -> GND wiring.
 
 // ---------------------------
 // PWM
@@ -19,6 +20,7 @@ const int PWM_RES  = 8;   // 0..255
 bool rec = false;
 bool ir_on = false;
 uint8_t brightness = 255;
+bool serial_host_seen = false;
 
 // ---------------------------
 // Debounce
@@ -30,16 +32,30 @@ const unsigned long DEBOUNCE_MS = 40;
 // ---------------------------
 // Outputs
 // ---------------------------
+void setRecLed(bool on) {
+  digitalWrite(REC_LED_PIN, on == REC_LED_ACTIVE_HIGH ? HIGH : LOW);
+}
+
+void blinkRecLed(int count, int delay_ms = 80) {
+  for (int i = 0; i < count; ++i) {
+    setRecLed(true);
+    delay(delay_ms);
+    setRecLed(false);
+    delay(delay_ms);
+  }
+}
+
 void applyOutputs() {
-  digitalWrite(REC_LED_PIN, rec ? HIGH : LOW);
+  setRecLed(rec);
   ledcWrite(IR_PIN, ir_on ? brightness : 0);
 }
 
 void printStatus() {
-  Serial.print("ID=XIAO_REC_CTRL ");
-  Serial.print("REC="); Serial.print(rec ? 1 : 0);
-  Serial.print(" IR="); Serial.print(ir_on ? 1 : 0);
-  Serial.print(" B=");  Serial.println((int)brightness);
+  Serial.println("ID=XIAO_REC_CTRL");
+  Serial.print("REC="); Serial.println(rec ? 1 : 0);
+  Serial.print("IR=");  Serial.println(ir_on ? 1 : 0);
+  Serial.print("B=");   Serial.println((int)brightness);
+  Serial.flush();
 }
 
 void setRec(bool on) {
@@ -54,12 +70,14 @@ void setRec(bool on) {
 
   Serial.print("REC="); Serial.println(rec ? 1 : 0);
   Serial.print("IR=");  Serial.println(ir_on ? 1 : 0);
+  Serial.flush();
 }
 
 void setIr(bool on) {
   ir_on = on;
   applyOutputs();
   Serial.print("IR="); Serial.println(ir_on ? 1 : 0);
+  Serial.flush();
 }
 
 void setBrightness(int b) {
@@ -68,6 +86,7 @@ void setBrightness(int b) {
   brightness = (uint8_t)b;
   applyOutputs();
   Serial.print("B="); Serial.println((int)brightness);
+  Serial.flush();
 }
 
 void setup() {
@@ -81,6 +100,9 @@ void setup() {
   bool ok = ledcAttach(IR_PIN, PWM_FREQ, PWM_RES);
   if (!ok) Serial.println("WARN: ledcAttach failed");
 
+  setRecLed(false);
+  blinkRecLed(2);
+
   rec = false;
   ir_on = false;
   brightness = 255;
@@ -90,6 +112,13 @@ void setup() {
 }
 
 void loop() {
+  bool serial_now = (bool)Serial;
+  if (serial_now && !serial_host_seen) {
+    delay(50);
+    printStatus();
+  }
+  serial_host_seen = serial_now;
+
   // ---- Button toggle ----
   bool btn = digitalRead(BUTTON_PIN);
 
@@ -121,6 +150,7 @@ void loop() {
       printStatus();
     } else if (cmd == "ID?" || cmd == "ID") {
       Serial.println("ID=XIAO_REC_CTRL");
+      Serial.flush();
     } else if (cmd.startsWith("REC=")) {
       setRec(cmd.endsWith("1"));
     } else if (cmd.startsWith("IR=")) {

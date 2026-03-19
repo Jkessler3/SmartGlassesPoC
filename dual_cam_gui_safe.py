@@ -15,10 +15,27 @@ CAM_READ_FAIL_LIMIT = 100
 CAM_READ_FAIL_SLEEP_S = 0.02
 SERIAL_PROBE_STARTUP_S = 0.35
 SERIAL_PROBE_WINDOW_S = 0.60
-SERIAL_CONNECT_SETTLE_S = 0.35
-SERIAL_PORT_TIMEOUT_S = 0.10
-SERIAL_WRITE_TIMEOUT_S = 0.25
-SERIAL_WRITE_TIMEOUT_LIMIT = 3
+SERIAL_CONNECT_SETTLE_S = 0.75
+SERIAL_PORT_TIMEOUT_S = 0.25
+SERIAL_PROBE_WRITE_TIMEOUT_S = 0.25
+SERIAL_SESSION_WRITE_TIMEOUT_S = None
+SERIAL_BRIGHTNESS_INTERVAL_S = 0.10
+SERIAL_PROBE_DTR = True
+SERIAL_PROBE_RTS = False
+SERIAL_SESSION_DTR = True
+SERIAL_SESSION_RTS = False
+WORLD_CAPTURE_WIDTH = 1280
+WORLD_CAPTURE_HEIGHT = 720
+WORLD_CAPTURE_FPS = 30
+EYE_CAPTURE_WIDTH = 640
+EYE_CAPTURE_HEIGHT = 480
+EYE_CAPTURE_FPS = 60
+WORLD_DISPLAY_WIDTH = 1280
+WORLD_DISPLAY_HEIGHT = 720
+EYE_DISPLAY_WIDTH = 640
+EYE_DISPLAY_HEIGHT = 480
+EYE_PAD_TOP = 120
+EYE_PAD_BOTTOM = 120
 
 
 # ---------- Timing ----------
@@ -104,16 +121,18 @@ def serial_port_sort_key(port_info):
 
 
 def probe_esp32_port(dev, baud=115200):
-    ser = serial.Serial(dev, baud, timeout=SERIAL_PORT_TIMEOUT_S, write_timeout=SERIAL_WRITE_TIMEOUT_S)
+    ser = serial.Serial()
+    ser.port = dev
+    ser.baudrate = baud
+    ser.timeout = SERIAL_PORT_TIMEOUT_S
+    ser.write_timeout = SERIAL_PROBE_WRITE_TIMEOUT_S
+    ser.dtr = SERIAL_PROBE_DTR
+    ser.rts = SERIAL_PROBE_RTS
+    ser.open()
     try:
-        try:
-            ser.dtr = False
-            ser.rts = False
-        except Exception:
-            pass
-
-        ser.reset_input_buffer()
         time.sleep(SERIAL_PROBE_STARTUP_S)
+        ser.reset_input_buffer()
+        ser.reset_output_buffer()
         ser.write(b"ID?\n")
         ser.flush()
 
@@ -141,6 +160,14 @@ def extract_prefixed_int(line: str, prefix: str):
     if not digits:
         return None
     return int("".join(digits))
+
+
+def tune_world_camera(cap):
+    cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
+    cap.set(cv2.CAP_PROP_FOCUS, 20)
+    cap.set(cv2.CAP_PROP_BRIGHTNESS, 0.5)
+    cap.set(cv2.CAP_PROP_CONTRAST, 0.5)
+    cap.set(cv2.CAP_PROP_SATURATION, 0.5)
 
 
 # ---------- Serial helpers ----------
@@ -191,9 +218,10 @@ class App:
         # Serial
         self.ser = None
         self.ser_thread = None
+        self.ser_writer_thread = None
         self.ser_stop = threading.Event()
         self.ser_q = queue.Queue()
-        self._ser_write_timeout_count = 0
+        self.ser_write_q = queue.Queue()
         self._suppress_brightness_send = False
 
         # Cameras
@@ -299,17 +327,21 @@ class App:
             self.on_disconnect()
 
         try:
-            self.ser = serial.Serial(
-                port,
-                115200,
-                timeout=SERIAL_PORT_TIMEOUT_S,
-                write_timeout=SERIAL_WRITE_TIMEOUT_S,
-            )
-            self.ser.dtr = False
-            self.ser.rts = False
-            self.ser.reset_input_buffer()
-            self.ser.reset_output_buffer()
+            ser = serial.Serial()
+            ser.port = port
+            ser.baudrate = 115200
+            ser.timeout = SERIAL_PORT_TIMEOUT_S
+            ser.write_timeout = SERIAL_SESSION_WRITE_TIMEOUT_S
+            ser.dtr = SERIAL_SESSION_DTR
+            ser.rts = SERIAL_SESSION_RTS
+            ser.open()
+
+            self.ser = ser
+            self.ser.dtr = SERIAL_SESSION_DTR
+            self.ser.rts = SERIAL_SESSION_RTS
             time.sleep(SERIAL_CONNECT_SETTLE_S)
+            self.ser.reset_output_buffer()
+            print(f"SER OPEN: {port} dtr={self.ser.dtr} rts={self.ser.rts}")
         except Exception as e:
             messagebox.showerror(
                 "ESP32",
@@ -319,17 +351,21 @@ class App:
             return
 
         self.ser_stop.clear()
-        self._ser_write_timeout_count = 0
+        self.ser_q = queue.Queue()
+        self.ser_write_q = queue.Queue()
         self.ser_thread = threading.Thread(target=self.serial_reader, daemon=True)
+        self.ser_writer_thread = threading.Thread(target=self.serial_writer, daemon=True)
         self.ser_thread.start()
+        self.ser_writer_thread.start()
 
         self.status.set(f"Connected {port}")
+        self.root.after(300, lambda: self.send_ser("STATUS?"))
 
     def on_disconnect(self, status_text="Disconnected"):
         self.ser_stop.set()
+        self.ser_write_q.put(None)
         ser = self.ser
         self.ser = None
-        self._ser_write_timeout_count = 0
         if ser:
             try:
                 ser.close()
@@ -340,6 +376,11 @@ class App:
         if ser_thread and ser_thread.is_alive() and ser_thread is not threading.current_thread():
             ser_thread.join(timeout=0.5)
         self.ser_thread = None
+
+        ser_writer_thread = self.ser_writer_thread
+        if ser_writer_thread and ser_writer_thread.is_alive() and ser_writer_thread is not threading.current_thread():
+            ser_writer_thread.join(timeout=0.5)
+        self.ser_writer_thread = None
         self.status.set(status_text)
 
     def _disconnect_if_current(self, ser, status_text):
@@ -347,46 +388,34 @@ class App:
             self.on_disconnect(status_text)
 
     def send_ser(self, s: str):
-        ser = self.ser
-        if not ser:
+        if not self.ser:
+            print("SER TX skipped:", s)
             return False
-        try:
-            ser.write((s.strip() + "\n").encode())
-            self._ser_write_timeout_count = 0
-            return True
-        except serial.SerialTimeoutException:
-            if self.ser is not ser or self.ser_stop.is_set():
-                return False
+        print("SER TX:", s)
+        self.ser_write_q.put(s.strip())
+        return True
+
+    def serial_writer(self):
+        while not self.ser_stop.is_set():
+            try:
+                cmd = self.ser_write_q.get(timeout=0.1)
+            except queue.Empty:
+                continue
+
+            if cmd is None:
+                break
+
+            ser = self.ser
+            if not ser:
+                continue
 
             try:
-                ser.reset_output_buffer()
-            except Exception:
-                pass
-
-            self._ser_write_timeout_count += 1
-            if self._ser_write_timeout_count >= SERIAL_WRITE_TIMEOUT_LIMIT:
-                self.root.after(
-                    0,
-                    lambda current_ser=ser: self._disconnect_if_current(
-                        current_ser,
-                        "ESP32 disconnected after repeated write timeouts",
-                    ),
-                )
-            else:
-                self.root.after(
-                    0,
-                    lambda attempt=self._ser_write_timeout_count, cmd=s.strip(): self.status.set(
-                        f"ESP32 write timeout ({attempt}/{SERIAL_WRITE_TIMEOUT_LIMIT}) on {cmd}"
-                    ),
-                )
-            return False
-        except Exception as e:
-            if not self.ser_stop.is_set() and self.ser is ser:
-                self.root.after(
-                    0,
-                    lambda current_ser=ser, msg=f"ESP32 disconnected: {e}": self._disconnect_if_current(current_ser, msg)
-                )
-            return False
+                ser.write((cmd + "\n").encode())
+                ser.flush()
+            except Exception as e:
+                if not self.ser_stop.is_set() and self.ser is ser:
+                    self.ser_q.put(("error", ser, f"write failed on {cmd}: {e}"))
+                break
 
     def serial_reader(self):
         while not self.ser_stop.is_set():
@@ -394,13 +423,10 @@ class App:
             if not ser:
                 break
             try:
-                if ser.in_waiting:
-                    line = ser.readline().decode(errors="ignore").strip()
-                    if line:
-                        self._ser_write_timeout_count = 0
-                        self.ser_q.put(("line", ser, line))
-                else:
-                    time.sleep(0.01)
+                line = ser.readline().decode(errors="ignore").strip()
+                if line:
+                    print("SER RX:", line)
+                    self.ser_q.put(("line", ser, line))
             except Exception as e:
                 if not self.ser_stop.is_set():
                     self.ser_q.put(("error", ser, str(e)))
@@ -412,11 +438,11 @@ class App:
         with self.eye_lock:
             self.eye_q.clear()
 
-    def _start_camera_worker(self, cap, q, lock):
+    def _start_camera_worker(self, cap, q, lock, frame_transform=None):
         stop_event = threading.Event()
         thread = threading.Thread(
             target=self.cam_thread,
-            args=(cap, q, lock, stop_event),
+            args=(cap, q, lock, stop_event, frame_transform),
             daemon=True,
         )
         self.camera_workers.append({
@@ -477,17 +503,23 @@ class App:
             self.status.set("Failed to open cameras. Scan/apply again.")
             return False
 
-        try_mode(capW, 1280, 720, 30)
-        try_mode(capE, 640, 480, 60)
+        try_mode(capW, WORLD_CAPTURE_WIDTH, WORLD_CAPTURE_HEIGHT, WORLD_CAPTURE_FPS)
+        tune_world_camera(capW)
+        try_mode(capE, EYE_CAPTURE_WIDTH, EYE_CAPTURE_HEIGHT, EYE_CAPTURE_FPS)
 
         self.capW = capW
         self.capE = capE
         self._clear_frame_queues()
-        self._start_camera_worker(self.capW, self.world_q, self.world_lock)
+        self._start_camera_worker(
+            self.capW,
+            self.world_q,
+            self.world_lock,
+            frame_transform=lambda frame: cv2.rotate(frame, cv2.ROTATE_180),
+        )
         self._start_camera_worker(self.capE, self.eye_q, self.eye_lock)
         return True
 
-    def cam_thread(self, cap, q, lock, stop_event):
+    def cam_thread(self, cap, q, lock, stop_event, frame_transform=None):
         fail_count = 0
         while self.capture_running and not stop_event.is_set():
             try:
@@ -497,6 +529,8 @@ class App:
 
             if ok:
                 fail_count = 0
+                if frame_transform is not None:
+                    frame = frame_transform(frame)
                 with lock:
                     q.append((now_ns(), frame))
                 continue
@@ -544,7 +578,7 @@ class App:
             return
 
         now = time.monotonic()
-        if self.ser and (now - self._last_b_send) > 0.05:
+        if self.ser and (now - self._last_b_send) > SERIAL_BRIGHTNESS_INTERVAL_S:
             self._last_b_send = now
             self.send_ser(f"B={v}")
 
@@ -662,8 +696,16 @@ class App:
             te, fe = min(eye_items, key=lambda x: abs(x[0] - tw))
             dt_ms = (tw - te) / 1e6
 
-            fw_disp = cv2.resize(fw, (960, 540))
-            fe_disp = cv2.resize(fe, (960, 540))
+            fw_disp = cv2.resize(fw, (WORLD_DISPLAY_WIDTH, WORLD_DISPLAY_HEIGHT), interpolation=cv2.INTER_CUBIC)
+            fe_disp = cv2.resize(fe, (EYE_DISPLAY_WIDTH, EYE_DISPLAY_HEIGHT), interpolation=cv2.INTER_CUBIC)
+            fe_disp = cv2.copyMakeBorder(
+                fe_disp,
+                EYE_PAD_TOP,
+                EYE_PAD_BOTTOM,
+                0,
+                0,
+                cv2.BORDER_CONSTANT,
+            )
             combo = cv2.hconcat([fw_disp, fe_disp])
 
             cv2.putText(combo, f"W ts(ns)={tw}", (10, 25),

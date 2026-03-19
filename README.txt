@@ -17,7 +17,7 @@ ESP32 controller:
 - Seeed XIAO ESP32-S3
 - IR LEDs with current limiting resistors
 - N-MOSFET low-side switch for IR LEDs
-- Red LED for REC indicator
+- Red LED for REC indicator on `REC_LED_PIN`
 - Momentary pushbutton for record toggle
 
 ## Folder Layout
@@ -95,6 +95,8 @@ Notes:
 - The GUI parses inbound `REC=`, `IR=`, and `B=` updates and keeps its controls in sync.
 - The app does not poll `STATUS?` automatically; it relies on the ESP32 boot/status lines plus normal control traffic.
 - `REC=1` in firmware also forces `IR=1`.
+- The firmware now blinks the REC LED twice on boot as a quick wiring check.
+- If the REC LED logic is inverted for your wiring, flip `REC_LED_ACTIVE_HIGH` in `esp32_rec_ir_control.ino`.
 
 ## Verification Checklist
 
