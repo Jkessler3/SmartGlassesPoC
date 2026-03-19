@@ -53,7 +53,7 @@ In the GUI:
 - `Scan Cameras` pauses capture, scans available cameras, auto-picks world and eye, then reopens capture.
 - `Apply Cameras` closes and reopens capture with the selected indices.
 - `Find ESP32` probes likely serial devices and looks for `XIAO_REC_CTRL`.
-- `Connect` opens the selected COM port and requests device status.
+- `Connect` opens the selected COM port and listens for the ESP32 boot/status output.
 - `Record` toggles recording in the GUI and sends `REC=1` or `REC=0` to the ESP32.
 - `IR ON/OFF` sends `IR=1` or `IR=0`.
 - `Brightness` sends `B=0..255`.
@@ -93,7 +93,7 @@ Serial output from the firmware includes:
 
 Notes:
 - The GUI parses inbound `REC=`, `IR=`, and `B=` updates and keeps its controls in sync.
-- The app periodically sends `STATUS?` after connect to re-sync state.
+- The app does not poll `STATUS?` automatically; it relies on the ESP32 boot/status lines plus normal control traffic.
 - `REC=1` in firmware also forces `IR=1`.
 
 ## Verification Checklist
