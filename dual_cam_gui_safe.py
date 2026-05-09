@@ -138,6 +138,8 @@ class App:
     def __init__(self, config):
         self.config = config
         self.camera_backend = load_camera_backend(config.camera_backend)
+        if hasattr(self.camera_backend, "configure"):
+            self.camera_backend.configure(config)
 
         self.root = tk.Tk()
         self.root.title("Smart Glasses PoC (GUI + Dual Cam)")

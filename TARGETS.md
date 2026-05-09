@@ -72,6 +72,19 @@ Then open this from Windows:
 http://<pi-ip-address>:8000
 ```
 
+The Windows GUI can also consume the same stream directly:
+
+```powershell
+python dual_cam_gui_safe.py --camera-backend mjpeg --world-url http://<pi-ip-address>:8000/stream.mjpg
+```
+
+With one Pi camera, the GUI maps that stream to both panes. Later, with a
+second camera/stream, provide it as:
+
+```powershell
+python dual_cam_gui_safe.py --camera-backend mjpeg --world-url http://<world-pi-ip>:8000/stream.mjpg --eye-url http://<eye-pi-ip>:8000/stream.mjpg
+```
+
 Run with:
 
 ```bash

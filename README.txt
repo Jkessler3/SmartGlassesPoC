@@ -60,6 +60,11 @@ SSH/WiFi camera preview from the Pi:
 - If colors look swapped: `python3 scripts/pi_wifi_stream.py --width 640 --height 480 --fps 15 --input-order bgr`
 - Open `http://<pi-ip-address>:8000` on the Windows PC.
 
+Windows GUI using the Pi WiFi stream:
+- Start the Pi stream first.
+- Run `python dual_cam_gui_safe.py --camera-backend mjpeg --world-url http://<pi-ip-address>:8000/stream.mjpg`
+- With one Pi camera, the app uses the same stream for world and eye until a second `--eye-url` is provided.
+
 See `TARGETS.md` for the Pi Zero 2 W and CM5 target plan.
 
 In the GUI:

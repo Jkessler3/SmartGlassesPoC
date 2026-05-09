@@ -28,4 +28,9 @@ def load_camera_backend(name="auto"):
         picamera2_dual.assert_available()
         return picamera2_dual
 
+    if selected == "mjpeg":
+        from . import mjpeg_stream
+
+        return mjpeg_stream
+
     raise ValueError(f"Unknown camera backend: {name}")
