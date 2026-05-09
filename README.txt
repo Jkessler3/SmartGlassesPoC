@@ -57,6 +57,7 @@ Raspberry Pi OS Bookworm/Picamera2 launch:
 
 SSH/WiFi camera preview from the Pi:
 - `python3 scripts/pi_wifi_stream.py --width 640 --height 480 --fps 15`
+- If colors look swapped: `python3 scripts/pi_wifi_stream.py --width 640 --height 480 --fps 15 --input-order bgr`
 - Open `http://<pi-ip-address>:8000` on the Windows PC.
 
 See `TARGETS.md` for the Pi Zero 2 W and CM5 target plan.

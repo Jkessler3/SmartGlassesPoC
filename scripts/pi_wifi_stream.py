@@ -24,7 +24,7 @@ class FrameStore:
             return self._jpeg, self._ts
 
 
-def camera_worker(store, camera_num, width, height, fps, quality, stop_event):
+def camera_worker(store, camera_num, width, height, fps, quality, input_order, stop_event):
     from picamera2 import Picamera2
 
     picam = Picamera2(camera_num=camera_num)
@@ -43,7 +43,9 @@ def camera_worker(store, camera_num, width, height, fps, quality, stop_event):
         while not stop_event.is_set():
             t0 = time.monotonic()
             frame = picam.capture_array()
-            ok, jpeg = cv2.imencode(".jpg", cv2.cvtColor(frame, cv2.COLOR_RGB2BGR), encode_params)
+            if input_order == "rgb":
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            ok, jpeg = cv2.imencode(".jpg", frame, encode_params)
             if ok:
                 store.update(jpeg.tobytes())
 
@@ -142,13 +144,28 @@ def main():
     parser.add_argument("--height", type=int, default=480)
     parser.add_argument("--fps", type=int, default=15)
     parser.add_argument("--quality", type=int, default=75)
+    parser.add_argument(
+        "--input-order",
+        choices=("rgb", "bgr"),
+        default="rgb",
+        help="Color channel order returned by Picamera2 before JPEG encoding.",
+    )
     args = parser.parse_args()
 
     store = FrameStore()
     stop_event = threading.Event()
     thread = threading.Thread(
         target=camera_worker,
-        args=(store, args.camera, args.width, args.height, args.fps, args.quality, stop_event),
+        args=(
+            store,
+            args.camera,
+            args.width,
+            args.height,
+            args.fps,
+            args.quality,
+            args.input_order,
+            stop_event,
+        ),
         daemon=True,
     )
     thread.start()

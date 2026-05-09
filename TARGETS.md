@@ -54,6 +54,12 @@ preview server on the Pi:
 python3 scripts/pi_wifi_stream.py --width 640 --height 480 --fps 15
 ```
 
+If red and blue look swapped in the browser, restart the stream with:
+
+```bash
+python3 scripts/pi_wifi_stream.py --width 640 --height 480 --fps 15 --input-order bgr
+```
+
 Find the Pi address:
 
 ```bash
