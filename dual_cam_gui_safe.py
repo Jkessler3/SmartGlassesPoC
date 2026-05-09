@@ -12,6 +12,7 @@ from serial.tools import list_ports
 
 from camera_backends import load_camera_backend
 from config import load_config
+from glasses_discovery import discover_glasses
 
 CAM_READ_FAIL_LIMIT = 100
 CAM_READ_FAIL_SLEEP_S = 0.02
@@ -148,6 +149,9 @@ class App:
         self.world_idx = tk.IntVar(value=0)
         self.eye_idx = tk.IntVar(value=1)
         self.port_var = tk.StringVar(value="")
+        self.pi_host_var = tk.StringVar(value="")
+        self.glasses_var = tk.StringVar(value="")
+        self.glasses_devices = []
         self.rec_var = tk.BooleanVar(value=False)
         self.ir_var = tk.BooleanVar(value=False)
         self.brightness_var = tk.IntVar(value=255)
@@ -187,7 +191,8 @@ class App:
         self._build_ui()
         self.root.protocol("WM_DELETE_WINDOW", self.on_quit)
 
-        self.open_cameras()
+        if self.camera_backend.name != "mjpeg" or self.config.world_url:
+            self.open_cameras()
         self.root.after(30, self.tick)
 
     # ---------- UI ----------
@@ -195,16 +200,70 @@ class App:
         frm = ttk.Frame(self.root, padding=10)
         frm.grid(row=0, column=0, sticky="nsew")
 
-        cam_box = ttk.LabelFrame(frm, text="Cameras", padding=10)
+        cam_box_title = "Pi Stream Cameras" if self.camera_backend.name == "mjpeg" else "Cameras"
+        cam_box = ttk.LabelFrame(frm, text=cam_box_title, padding=10)
         cam_box.grid(row=0, column=0, sticky="ew")
 
-        ttk.Button(cam_box, text="Scan Cameras", command=self.on_scan_cameras).grid(row=0, column=0, padx=5, pady=5)
-        ttk.Label(cam_box, text="World index").grid(row=1, column=0, sticky="w")
+        scan_text = "Scan Sources" if self.camera_backend.name == "mjpeg" else "Scan Cameras"
+        ttk.Button(cam_box, text=scan_text, command=self.on_scan_cameras).grid(row=0, column=0, padx=5, pady=5)
+        ttk.Label(cam_box, text="World source").grid(row=1, column=0, sticky="w")
         ttk.Entry(cam_box, textvariable=self.world_idx, width=6).grid(row=1, column=1, sticky="w")
-        ttk.Label(cam_box, text="Eye index").grid(row=2, column=0, sticky="w")
+        ttk.Label(cam_box, text="Eye source").grid(row=2, column=0, sticky="w")
         ttk.Entry(cam_box, textvariable=self.eye_idx, width=6).grid(row=2, column=1, sticky="w")
-        ttk.Button(cam_box, text="Apply Cameras", command=self.on_apply_cameras).grid(row=3, column=0, columnspan=2, pady=5)
+        ttk.Button(cam_box, text="Apply Sources", command=self.on_apply_cameras).grid(row=3, column=0, columnspan=2, pady=5)
 
+        if self.camera_backend.name == "mjpeg":
+            self._build_pi_glasses_ui(frm)
+        else:
+            self._build_serial_ui(frm)
+
+        ctl_box = ttk.LabelFrame(frm, text="Controls", padding=10)
+        ctl_box.grid(row=2, column=0, sticky="ew", pady=(10, 0))
+
+        self.btn_rec = ttk.Button(ctl_box, text="Record OFF", command=self.on_toggle_record)
+        self.btn_rec.grid(row=0, column=0, padx=5, pady=5)
+
+        if self.camera_backend.name != "mjpeg":
+            self.btn_ir = ttk.Button(ctl_box, text="IR OFF", command=self.on_toggle_ir)
+            self.btn_ir.grid(row=0, column=1, padx=5, pady=5)
+
+            ttk.Label(ctl_box, text="Brightness").grid(row=1, column=0, sticky="w")
+            self.lbl_b = ttk.Label(ctl_box, text="255")
+            self.lbl_b.grid(row=1, column=1, sticky="e")
+            self.sld = ttk.Scale(
+                ctl_box, from_=0, to=255, orient="horizontal",
+                variable=self.brightness_var, command=self.on_brightness_change
+            )
+            self.sld.grid(row=2, column=0, columnspan=2, sticky="ew", padx=5)
+            quit_row = 3
+        else:
+            self.btn_ir = None
+            self.lbl_b = None
+            self.sld = None
+            quit_row = 1
+
+        ttk.Button(ctl_box, text="Quit", command=self.on_quit).grid(row=quit_row, column=0, columnspan=2, pady=5)
+
+        ttk.Label(frm, textvariable=self.status).grid(row=3, column=0, sticky="ew", pady=(10, 0))
+
+    def _build_pi_glasses_ui(self, frm):
+        pi_box = ttk.LabelFrame(frm, text="Pi Glasses", padding=10)
+        pi_box.grid(row=1, column=0, sticky="ew", pady=(10, 0))
+
+        ttk.Button(pi_box, text="Find Glasses", command=self.on_find_glasses).grid(row=0, column=0, padx=5, pady=5)
+        ttk.Label(pi_box, text="Device").grid(row=0, column=1, sticky="e")
+        self.glasses_combo = ttk.Combobox(pi_box, textvariable=self.glasses_var, width=36, state="readonly")
+        self.glasses_combo.grid(row=0, column=2, padx=5, sticky="ew")
+        self.glasses_combo.bind("<<ComboboxSelected>>", self.on_glasses_selected)
+
+        ttk.Label(pi_box, text="Host/IP").grid(row=1, column=0, sticky="w")
+        ttk.Entry(pi_box, textvariable=self.pi_host_var, width=18).grid(row=1, column=1, sticky="w")
+        ttk.Button(pi_box, text="Connect Stream", command=self.on_connect_glasses).grid(row=1, column=2, padx=5, sticky="w")
+
+        if self.config.world_url:
+            self.pi_host_var.set(self.config.world_url)
+
+    def _build_serial_ui(self, frm):
         ser_box = ttk.LabelFrame(frm, text="ESP32 Serial", padding=10)
         ser_box.grid(row=1, column=0, sticky="ew", pady=(10, 0))
 
@@ -214,27 +273,70 @@ class App:
         ttk.Button(ser_box, text="Connect", command=self.on_connect).grid(row=0, column=3, padx=5)
         ttk.Button(ser_box, text="Disconnect", command=self.on_disconnect).grid(row=0, column=4, padx=5)
 
-        ctl_box = ttk.LabelFrame(frm, text="Controls", padding=10)
-        ctl_box.grid(row=2, column=0, sticky="ew", pady=(10, 0))
+    def _stream_url_from_host(self, host_or_url):
+        value = host_or_url.strip()
+        if not value:
+            return ""
+        if value.startswith("http://") or value.startswith("https://"):
+            if value.endswith("/"):
+                return value + "stream.mjpg"
+            if value.endswith(".mjpg"):
+                return value
+            return value + "/stream.mjpg"
+        if ":" not in value:
+            value = f"{value}:8000"
+        return f"http://{value}/stream.mjpg"
 
-        self.btn_rec = ttk.Button(ctl_box, text="Record OFF", command=self.on_toggle_record)
-        self.btn_rec.grid(row=0, column=0, padx=5, pady=5)
+    def on_find_glasses(self):
+        self.status.set("Finding Pi glasses on local network...")
+        self.root.update_idletasks()
 
-        self.btn_ir = ttk.Button(ctl_box, text="IR OFF", command=self.on_toggle_ir)
-        self.btn_ir.grid(row=0, column=1, padx=5, pady=5)
+        def worker():
+            devices = discover_glasses()
 
-        ttk.Label(ctl_box, text="Brightness").grid(row=1, column=0, sticky="w")
-        self.lbl_b = ttk.Label(ctl_box, text="255")
-        self.lbl_b.grid(row=1, column=1, sticky="e")
-        self.sld = ttk.Scale(
-            ctl_box, from_=0, to=255, orient="horizontal",
-            variable=self.brightness_var, command=self.on_brightness_change
-        )
-        self.sld.grid(row=2, column=0, columnspan=2, sticky="ew", padx=5)
+            def done():
+                self.glasses_devices = devices
+                descriptions = [device.description for device in devices]
+                self.glasses_combo["values"] = descriptions
+                if devices:
+                    self.glasses_combo.current(0)
+                    self.glasses_var.set(descriptions[0])
+                    self.pi_host_var.set(devices[0].host)
+                    self.status.set(f"Found {len(devices)} Pi glasses device(s)")
+                else:
+                    self.status.set("No Pi glasses found. Enter host/IP manually.")
 
-        ttk.Button(ctl_box, text="Quit", command=self.on_quit).grid(row=3, column=0, columnspan=2, pady=5)
+            self.root.after(0, done)
 
-        ttk.Label(frm, textvariable=self.status).grid(row=3, column=0, sticky="ew", pady=(10, 0))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def on_glasses_selected(self, _event=None):
+        idx = getattr(self, "glasses_combo", None).current() if hasattr(self, "glasses_combo") else -1
+        if idx is not None and 0 <= idx < len(self.glasses_devices):
+            self.pi_host_var.set(self.glasses_devices[idx].host)
+
+    def on_connect_glasses(self):
+        host = self.pi_host_var.get().strip()
+        stream_url = ""
+        for device in self.glasses_devices:
+            if host in (device.host, device.description, device.name):
+                stream_url = device.stream_url
+                break
+        if not stream_url:
+            stream_url = self._stream_url_from_host(host)
+        if not stream_url:
+            messagebox.showwarning("Pi Glasses", "Enter a Pi host/IP or click Find Glasses.")
+            return
+
+        self.close_cameras()
+        if hasattr(self.camera_backend, "set_urls"):
+            self.camera_backend.set_urls(stream_url, "")
+        self.world_idx.set(0)
+        self.eye_idx.set(1)
+        if self.open_cameras():
+            self.status.set(f"Connected Pi stream: {stream_url}")
+        else:
+            self.status.set(f"Could not open Pi stream: {stream_url}")
 
     # ---------- Serial ----------
     def on_find_port(self):
@@ -510,7 +612,8 @@ class App:
 
     def on_brightness_change(self, _=None):
         v = int(self.brightness_var.get())
-        self.lbl_b.config(text=str(v))
+        if self.lbl_b is not None:
+            self.lbl_b.config(text=str(v))
 
         if self._suppress_brightness_send:
             return
@@ -527,7 +630,8 @@ class App:
             self.brightness_var.set(value)
         finally:
             self._suppress_brightness_send = False
-        self.lbl_b.config(text=str(value))
+        if self.lbl_b is not None:
+            self.lbl_b.config(text=str(value))
 
     def set_record(self, on: bool, send_to_esp: bool):
         self.rec_var.set(on)
@@ -537,7 +641,8 @@ class App:
 
     def set_ir(self, on: bool, send_to_esp: bool):
         self.ir_var.set(on)
-        self.btn_ir.config(text="IR ON" if on else "IR OFF")
+        if self.btn_ir is not None:
+            self.btn_ir.config(text="IR ON" if on else "IR OFF")
         if send_to_esp and self.ser:
             self.send_ser("IR=1" if on else "IR=0")
 

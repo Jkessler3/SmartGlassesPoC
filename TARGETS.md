@@ -51,7 +51,7 @@ To view the camera over WiFi from the Windows PC without VNC, start the MJPEG
 preview server on the Pi:
 
 ```bash
-python3 scripts/pi_wifi_stream.py --width 640 --height 480 --fps 15
+python3 scripts/pi_wifi_stream.py --name glasses-left --width 640 --height 480 --fps 15
 ```
 
 If red and blue look swapped in the browser, restart the stream with:
@@ -75,11 +75,20 @@ http://<pi-ip-address>:8000
 The Windows GUI can also consume the same stream directly:
 
 ```powershell
+python dual_cam_gui_safe.py --camera-backend mjpeg
+```
+
+Click `Find Glasses`, choose the right named Pi device, and click
+`Connect Stream`.
+
+Manual connection still works:
+
+```powershell
 python dual_cam_gui_safe.py --camera-backend mjpeg --world-url http://<pi-ip-address>:8000/stream.mjpg
 ```
 
 With one Pi camera, the GUI maps that stream to both panes. Later, with a
-second camera/stream, provide it as:
+second camera/stream, provide it manually as:
 
 ```powershell
 python dual_cam_gui_safe.py --camera-backend mjpeg --world-url http://<world-pi-ip>:8000/stream.mjpg --eye-url http://<eye-pi-ip>:8000/stream.mjpg

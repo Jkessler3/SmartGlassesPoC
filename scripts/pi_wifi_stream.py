@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import argparse
+import json
+import socket
 import threading
 import time
 from http import HTTPStatus
@@ -63,7 +65,7 @@ def camera_worker(store, camera_num, width, height, fps, quality, input_order, s
             pass
 
 
-def make_handler(store):
+def make_handler(store, device_name, camera_num, width, height, fps):
     class StreamHandler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
             print("%s - %s" % (self.address_string(), fmt % args))
@@ -91,6 +93,29 @@ def make_handler(store):
 </body>
 </html>"""
                 )
+                return
+
+            if self.path == "/status.json":
+                jpeg, ts = store.latest()
+                payload = {
+                    "service": "smart-glasses-pi-stream",
+                    "name": device_name,
+                    "hostname": socket.gethostname(),
+                    "camera": camera_num,
+                    "width": width,
+                    "height": height,
+                    "fps": fps,
+                    "has_frame": jpeg is not None,
+                    "last_frame_age_s": round(time.time() - ts, 3) if ts else None,
+                    "stream_path": "/stream.mjpg",
+                    "snapshot_path": "/snapshot.jpg",
+                }
+                body = json.dumps(payload, indent=2).encode("utf-8")
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
                 return
 
             if self.path == "/snapshot.jpg":
@@ -144,6 +169,7 @@ def main():
     parser.add_argument("--height", type=int, default=480)
     parser.add_argument("--fps", type=int, default=15)
     parser.add_argument("--quality", type=int, default=75)
+    parser.add_argument("--name", default=socket.gethostname(), help="Friendly glasses/device name.")
     parser.add_argument(
         "--input-order",
         choices=("rgb", "bgr"),
@@ -170,8 +196,11 @@ def main():
     )
     thread.start()
 
-    server = ThreadingHTTPServer((args.host, args.port), make_handler(store))
-    print(f"Streaming camera {args.camera} at http://{args.host}:{args.port}")
+    server = ThreadingHTTPServer(
+        (args.host, args.port),
+        make_handler(store, args.name, args.camera, args.width, args.height, args.fps),
+    )
+    print(f"Streaming {args.name} camera {args.camera} at http://{args.host}:{args.port}")
     print("From Windows, open http://<pi-ip-address>:%d" % args.port)
     try:
         server.serve_forever()

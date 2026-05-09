@@ -7,9 +7,13 @@ _eye_url = ""
 
 
 def configure(config):
+    set_urls(config.world_url, config.eye_url)
+
+
+def set_urls(world_url, eye_url=""):
     global _world_url, _eye_url
-    _world_url = config.world_url
-    _eye_url = config.eye_url or config.world_url
+    _world_url = world_url
+    _eye_url = eye_url or world_url
 
 
 def _url_for_idx(idx):
