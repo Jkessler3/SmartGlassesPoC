@@ -13,6 +13,7 @@ from serial.tools import list_ports
 from camera_backends import load_camera_backend
 from config import load_config
 from glasses_discovery import discover_glasses
+from pi_snapshot import capture_snapshot
 
 CAM_READ_FAIL_LIMIT = 100
 CAM_READ_FAIL_SLEEP_S = 0.02
@@ -153,6 +154,8 @@ class App:
         self.glasses_var = tk.StringVar(value="")
         self.glasses_devices = []
         self.preview_label = "Pi stream"
+        self.current_stream_url = config.world_url
+        self.current_status_url = ""
         self.single_stream_preview = False
         self.rec_var = tk.BooleanVar(value=False)
         self.ir_var = tk.BooleanVar(value=False)
@@ -242,6 +245,7 @@ class App:
             self.btn_ir = None
             self.lbl_b = None
             self.sld = None
+            ttk.Button(ctl_box, text="Snapshot", command=self.on_capture_snapshot).grid(row=0, column=1, padx=5, pady=5)
             quit_row = 1
 
         ttk.Button(ctl_box, text="Quit", command=self.on_quit).grid(row=quit_row, column=0, columnspan=2, pady=5)
@@ -323,16 +327,19 @@ class App:
         for device in self.glasses_devices:
             if host in (device.host, device.description, device.name):
                 stream_url = device.stream_url
+                self.current_status_url = device.status_url
                 self.preview_label = device.name
                 break
         if not stream_url:
             stream_url = self._stream_url_from_host(host)
+            self.current_status_url = ""
             self.preview_label = host or stream_url
         if not stream_url:
             messagebox.showwarning("Pi Glasses", "Enter a Pi host/IP or click Find Glasses.")
             return
 
         self.close_cameras()
+        self.current_stream_url = stream_url
         if hasattr(self.camera_backend, "set_urls"):
             self.camera_backend.set_urls(stream_url, "", world_label=self.preview_label)
         self.world_idx.set(0)
@@ -826,6 +833,26 @@ class App:
             self.set_record(not self.rec_var.get(), send_to_esp=True)
 
         self.root.after(30, self.tick)
+
+    def on_capture_snapshot(self):
+        if self.camera_backend.name != "mjpeg":
+            return
+        self.status.set("Capturing Pi snapshot...")
+        self.root.update_idletasks()
+
+        def worker():
+            try:
+                result = capture_snapshot(
+                    status_url=self.current_status_url,
+                    stream_url=self.current_stream_url,
+                )
+                text = f"Snapshot saved: {result.get('path') or result.get('filename')}"
+            except Exception as exc:
+                text = str(exc)
+
+            self.root.after(0, lambda: self.status.set(text))
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def on_quit(self):
         self.capture_running = False

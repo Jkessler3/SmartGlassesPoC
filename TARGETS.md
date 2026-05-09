@@ -54,6 +54,15 @@ preview server on the Pi:
 python3 scripts/pi_wifi_stream.py --name glasses-left --width 640 --height 480 --fps 15
 ```
 
+The stream server also supports Pi-side snapshots:
+
+```bash
+curl -X POST http://localhost:8000/capture
+```
+
+Snapshots are saved under `~/poc_out/snapshots` unless `--snapshot-dir` is
+provided.
+
 If red and blue look swapped in the browser, restart the stream with:
 
 ```bash
@@ -80,6 +89,9 @@ python dual_cam_gui_safe.py --camera-backend mjpeg
 
 Click `Find Glasses`, choose the right named Pi device, and click
 `Connect Stream`.
+
+Click `Snapshot` in MJPEG mode to save the latest frame on the Pi and display
+the returned filename/path in the status line.
 
 Manual connection still works:
 

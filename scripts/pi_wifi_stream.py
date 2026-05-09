@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import os
 import socket
 import threading
 import time
@@ -65,7 +66,7 @@ def camera_worker(store, camera_num, width, height, fps, quality, input_order, s
             pass
 
 
-def make_handler(store, device_name, camera_num, width, height, fps):
+def make_handler(store, device_name, camera_num, width, height, fps, snapshot_dir):
     class StreamHandler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
             print("%s - %s" % (self.address_string(), fmt % args))
@@ -109,6 +110,7 @@ def make_handler(store, device_name, camera_num, width, height, fps):
                     "last_frame_age_s": round(time.time() - ts, 3) if ts else None,
                     "stream_path": "/stream.mjpg",
                     "snapshot_path": "/snapshot.jpg",
+                    "capture_path": "/capture",
                 }
                 body = json.dumps(payload, indent=2).encode("utf-8")
                 self.send_response(HTTPStatus.OK)
@@ -157,6 +159,38 @@ def make_handler(store, device_name, camera_num, width, height, fps):
 
             self.send_error(HTTPStatus.NOT_FOUND)
 
+        def do_POST(self):
+            if self.path != "/capture":
+                self.send_error(HTTPStatus.NOT_FOUND)
+                return
+
+            jpeg, ts = store.latest()
+            if jpeg is None:
+                self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, "No frame yet")
+                return
+
+            os.makedirs(snapshot_dir, exist_ok=True)
+            safe_name = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in device_name)
+            stamp = time.strftime("%Y%m%d_%H%M%S")
+            filename = f"{safe_name}_{stamp}.jpg"
+            path = os.path.abspath(os.path.join(snapshot_dir, filename))
+            with open(path, "wb") as fh:
+                fh.write(jpeg)
+
+            payload = {
+                "ok": True,
+                "name": device_name,
+                "filename": filename,
+                "path": path,
+                "frame_ts": ts,
+            }
+            body = json.dumps(payload, indent=2).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
     return StreamHandler
 
 
@@ -170,6 +204,11 @@ def main():
     parser.add_argument("--fps", type=int, default=15)
     parser.add_argument("--quality", type=int, default=75)
     parser.add_argument("--name", default=socket.gethostname(), help="Friendly glasses/device name.")
+    parser.add_argument(
+        "--snapshot-dir",
+        default=os.path.expanduser("~/poc_out/snapshots"),
+        help="Directory where POST /capture saves JPEG snapshots.",
+    )
     parser.add_argument(
         "--input-order",
         choices=("rgb", "bgr"),
@@ -198,7 +237,15 @@ def main():
 
     server = ThreadingHTTPServer(
         (args.host, args.port),
-        make_handler(store, args.name, args.camera, args.width, args.height, args.fps),
+        make_handler(
+            store,
+            args.name,
+            args.camera,
+            args.width,
+            args.height,
+            args.fps,
+            args.snapshot_dir,
+        ),
     )
     print(f"Streaming {args.name} camera {args.camera} at http://{args.host}:{args.port}")
     print("From Windows, open http://<pi-ip-address>:%d" % args.port)
