@@ -49,6 +49,14 @@ Dependencies:
 3. Close Arduino Serial Monitor and Serial Plotter if they are open.
 4. Run `RUN.bat`.
 
+Windows/OpenCV can also be launched directly:
+- `python dual_cam_gui_safe.py --camera-backend opencv`
+
+Raspberry Pi OS Bookworm/Picamera2 launch:
+- `python3 dual_cam_gui_safe.py --camera-backend picamera2 --outdir ~/poc_out`
+
+See `TARGETS.md` for the Pi Zero 2 W and CM5 target plan.
+
 In the GUI:
 - `Scan Cameras` pauses capture, scans available cameras, auto-picks world and eye, then reopens capture.
 - `Apply Cameras` closes and reopens capture with the selected indices.

@@ -7,9 +7,11 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 import cv2
-import numpy as np
 import serial
 from serial.tools import list_ports
+
+from camera_backends import load_camera_backend
+from config import load_config
 
 CAM_READ_FAIL_LIMIT = 100
 CAM_READ_FAIL_SLEEP_S = 0.02
@@ -41,67 +43,6 @@ EYE_PAD_BOTTOM = 120
 # ---------- Timing ----------
 def now_ns():
     return time.perf_counter_ns()
-
-
-# ---------- Camera helpers ----------
-def open_cam(idx: int):
-    cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
-    if cap is not None and cap.isOpened():
-        return cap
-    cap = cv2.VideoCapture(idx)
-    if cap is None or not cap.isOpened():
-        return None
-    return cap
-
-def try_mode(cap, w, h, fps):
-    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(w))
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(h))
-    cap.set(cv2.CAP_PROP_FPS, int(fps))
-
-def estimate_fps(cap, frames=20):
-    t0 = time.time()
-    got = 0
-    for _ in range(frames):
-        ok, _ = cap.read()
-        if ok:
-            got += 1
-    dt = time.time() - t0
-    return (got / dt) if dt > 0 else 0.0
-
-def is_grayscale_like(frame):
-    if frame is None or frame.ndim != 3 or frame.shape[2] != 3:
-        return True
-    b, g, r = frame[:, :, 0], frame[:, :, 1], frame[:, :, 2]
-    return (np.mean(np.abs(b - g)) + np.mean(np.abs(g - r))) < 1.0
-
-def scan_cameras(max_idx=10):
-    cams = []
-    for i in range(max_idx):
-        cap = open_cam(i)
-        if cap is None:
-            continue
-        try_mode(cap, 640, 480, 60)
-        ok, frame = cap.read()
-        fps = estimate_fps(cap)
-        grayish = is_grayscale_like(frame) if ok else False
-        cap.release()
-        cams.append({"idx": i, "fps_est": round(fps, 1), "grayish": bool(grayish)})
-    return cams
-
-def auto_pick_world_eye(cams):
-    if len(cams) < 2:
-        return None, None
-    sorted_cams = sorted(cams, key=lambda c: (c["grayish"], c["fps_est"]), reverse=True)
-    eye = sorted_cams[0]["idx"]
-    world = None
-    for c in sorted_cams[1:]:
-        if c["idx"] != eye:
-            world = c["idx"]
-            break
-    if world is None:
-        world = sorted_cams[1]["idx"]
-    return world, eye
 
 
 def serial_port_sort_key(port_info):
@@ -162,14 +103,6 @@ def extract_prefixed_int(line: str, prefix: str):
     return int("".join(digits))
 
 
-def tune_world_camera(cap):
-    cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
-    cap.set(cv2.CAP_PROP_FOCUS, 20)
-    cap.set(cv2.CAP_PROP_BRIGHTNESS, 0.5)
-    cap.set(cv2.CAP_PROP_CONTRAST, 0.5)
-    cap.set(cv2.CAP_PROP_SATURATION, 0.5)
-
-
 # ---------- Serial helpers ----------
 def find_esp32_port(baud=115200):
     """
@@ -202,7 +135,10 @@ def find_esp32_port(baud=115200):
 
 
 class App:
-    def __init__(self):
+    def __init__(self, config):
+        self.config = config
+        self.camera_backend = load_camera_backend(config.camera_backend)
+
         self.root = tk.Tk()
         self.root.title("Smart Glasses PoC (GUI + Dual Cam)")
 
@@ -213,7 +149,7 @@ class App:
         self.rec_var = tk.BooleanVar(value=False)
         self.ir_var = tk.BooleanVar(value=False)
         self.brightness_var = tk.IntVar(value=255)
-        self.status = tk.StringVar(value="Ready")
+        self.status = tk.StringVar(value=f"Ready ({self.camera_backend.name} camera backend)")
 
         # Serial
         self.ser = None
@@ -240,7 +176,7 @@ class App:
         self.rec_path = None
         self.csv_path = None
         self.frame_idx = 0
-        self.outdir = r"C:\poc_out"
+        self.outdir = self.config.outdir
         os.makedirs(self.outdir, exist_ok=True)
 
         # throttle brightness serial spam
@@ -463,8 +399,8 @@ class App:
         self.close_cameras()
 
         def worker():
-            cams = scan_cameras()
-            w, e = auto_pick_world_eye(cams) if len(cams) >= 2 else (None, None)
+            cams = self.camera_backend.scan_cameras()
+            w, e = self.camera_backend.auto_pick_world_eye(cams) if len(cams) >= 2 else (None, None)
 
             def done():
                 if len(cams) < 2:
@@ -490,8 +426,8 @@ class App:
             self.status.set(f"Applied world={self.world_idx.get()} eye={self.eye_idx.get()}")
 
     def open_cameras(self):
-        capW = open_cam(self.world_idx.get())
-        capE = open_cam(self.eye_idx.get())
+        capW = self.camera_backend.open_cam(self.world_idx.get())
+        capE = self.camera_backend.open_cam(self.eye_idx.get())
         if capW is None or capE is None:
             try:
                 if capW is not None:
@@ -503,9 +439,9 @@ class App:
             self.status.set("Failed to open cameras. Scan/apply again.")
             return False
 
-        try_mode(capW, WORLD_CAPTURE_WIDTH, WORLD_CAPTURE_HEIGHT, WORLD_CAPTURE_FPS)
-        tune_world_camera(capW)
-        try_mode(capE, EYE_CAPTURE_WIDTH, EYE_CAPTURE_HEIGHT, EYE_CAPTURE_FPS)
+        self.camera_backend.try_mode(capW, WORLD_CAPTURE_WIDTH, WORLD_CAPTURE_HEIGHT, WORLD_CAPTURE_FPS)
+        self.camera_backend.tune_world_camera(capW)
+        self.camera_backend.try_mode(capE, EYE_CAPTURE_WIDTH, EYE_CAPTURE_HEIGHT, EYE_CAPTURE_FPS)
 
         self.capW = capW
         self.capE = capE
@@ -751,4 +687,4 @@ class App:
 
 
 if __name__ == "__main__":
-    App().root.mainloop()
+    App(load_config()).root.mainloop()
