@@ -55,6 +55,10 @@ Windows/OpenCV can also be launched directly:
 Raspberry Pi OS Bookworm/Picamera2 launch:
 - `python3 dual_cam_gui_safe.py --camera-backend picamera2 --outdir ~/poc_out`
 
+SSH/WiFi camera preview from the Pi:
+- `python3 scripts/pi_wifi_stream.py --width 640 --height 480 --fps 15`
+- Open `http://<pi-ip-address>:8000` on the Windows PC.
+
 See `TARGETS.md` for the Pi Zero 2 W and CM5 target plan.
 
 In the GUI:

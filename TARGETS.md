@@ -47,6 +47,25 @@ For SSH/headless validation, run the repo smoke test first:
 python3 scripts/pi_smoke_test.py --capture --probe-serial
 ```
 
+To view the camera over WiFi from the Windows PC without VNC, start the MJPEG
+preview server on the Pi:
+
+```bash
+python3 scripts/pi_wifi_stream.py --width 640 --height 480 --fps 15
+```
+
+Find the Pi address:
+
+```bash
+hostname -I
+```
+
+Then open this from Windows:
+
+```text
+http://<pi-ip-address>:8000
+```
+
 Run with:
 
 ```bash
