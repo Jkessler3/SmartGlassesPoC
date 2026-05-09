@@ -152,6 +152,8 @@ class App:
         self.pi_host_var = tk.StringVar(value="")
         self.glasses_var = tk.StringVar(value="")
         self.glasses_devices = []
+        self.preview_label = "Pi stream"
+        self.single_stream_preview = False
         self.rec_var = tk.BooleanVar(value=False)
         self.ir_var = tk.BooleanVar(value=False)
         self.brightness_var = tk.IntVar(value=255)
@@ -321,16 +323,18 @@ class App:
         for device in self.glasses_devices:
             if host in (device.host, device.description, device.name):
                 stream_url = device.stream_url
+                self.preview_label = device.name
                 break
         if not stream_url:
             stream_url = self._stream_url_from_host(host)
+            self.preview_label = host or stream_url
         if not stream_url:
             messagebox.showwarning("Pi Glasses", "Enter a Pi host/IP or click Find Glasses.")
             return
 
         self.close_cameras()
         if hasattr(self.camera_backend, "set_urls"):
-            self.camera_backend.set_urls(stream_url, "")
+            self.camera_backend.set_urls(stream_url, "", world_label=self.preview_label)
         self.world_idx.set(0)
         self.eye_idx.set(1)
         if self.open_cameras():
@@ -530,9 +534,14 @@ class App:
             self.status.set(f"Applied world={self.world_idx.get()} eye={self.eye_idx.get()}")
 
     def open_cameras(self):
+        is_single_mjpeg = (
+            self.camera_backend.name == "mjpeg"
+            and hasattr(self.camera_backend, "stream_count")
+            and self.camera_backend.stream_count() == 1
+        )
         capW = self.camera_backend.open_cam(self.world_idx.get())
-        capE = self.camera_backend.open_cam(self.eye_idx.get())
-        if capW is None or capE is None:
+        capE = None if is_single_mjpeg else self.camera_backend.open_cam(self.eye_idx.get())
+        if capW is None or (not is_single_mjpeg and capE is None):
             try:
                 if capW is not None:
                     capW.release()
@@ -545,10 +554,14 @@ class App:
 
         self.camera_backend.try_mode(capW, WORLD_CAPTURE_WIDTH, WORLD_CAPTURE_HEIGHT, WORLD_CAPTURE_FPS)
         self.camera_backend.tune_world_camera(capW)
-        self.camera_backend.try_mode(capE, EYE_CAPTURE_WIDTH, EYE_CAPTURE_HEIGHT, EYE_CAPTURE_FPS)
+        if capE is not None:
+            self.camera_backend.try_mode(capE, EYE_CAPTURE_WIDTH, EYE_CAPTURE_HEIGHT, EYE_CAPTURE_FPS)
 
         self.capW = capW
         self.capE = capE
+        self.single_stream_preview = is_single_mjpeg
+        if self.camera_backend.name == "mjpeg" and hasattr(self.camera_backend, "stream_label"):
+            self.preview_label = self.camera_backend.stream_label(0)
         self._clear_frame_queues()
         self._start_camera_worker(
             self.capW,
@@ -556,7 +569,8 @@ class App:
             self.world_lock,
             frame_transform=lambda frame: cv2.rotate(frame, cv2.ROTATE_180),
         )
-        self._start_camera_worker(self.capE, self.eye_q, self.eye_lock)
+        if self.capE is not None:
+            self._start_camera_worker(self.capE, self.eye_q, self.eye_lock)
         return True
 
     def cam_thread(self, cap, q, lock, stop_event, frame_transform=None):
@@ -691,6 +705,57 @@ class App:
 
         self.status.set(f"Saved: {self.rec_path}")
 
+    def _record_preview_frame(self, combo, tw, te, dt_ms):
+        if self.rec_var.get():
+            self.start_recording(combo)
+            if self.writer is not None:
+                self.writer.write(combo)
+                if self.csv_fh is not None:
+                    self.csv_fh.write(f"{self.frame_idx},{tw},{te},{dt_ms:.4f}\n")
+                    self.frame_idx += 1
+        else:
+            if self.writer is not None:
+                self.stop_recording()
+
+    def _build_single_stream_preview(self, tw, frame):
+        combo = cv2.resize(
+            frame,
+            (WORLD_DISPLAY_WIDTH, WORLD_DISPLAY_HEIGHT),
+            interpolation=cv2.INTER_CUBIC,
+        )
+        cv2.putText(combo, str(self.preview_label), (10, 25),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
+        cv2.putText(combo, f"ts(ns)={tw}", (10, 55),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
+        cv2.putText(combo,
+                    f"REC={'ON' if self.rec_var.get() else 'OFF'}",
+                    (10, 85), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
+        return combo
+
+    def _build_dual_preview(self, tw, fw, te, fe, dt_ms):
+        fw_disp = cv2.resize(fw, (WORLD_DISPLAY_WIDTH, WORLD_DISPLAY_HEIGHT), interpolation=cv2.INTER_CUBIC)
+        fe_disp = cv2.resize(fe, (EYE_DISPLAY_WIDTH, EYE_DISPLAY_HEIGHT), interpolation=cv2.INTER_CUBIC)
+        fe_disp = cv2.copyMakeBorder(
+            fe_disp,
+            EYE_PAD_TOP,
+            EYE_PAD_BOTTOM,
+            0,
+            0,
+            cv2.BORDER_CONSTANT,
+        )
+        combo = cv2.hconcat([fw_disp, fe_disp])
+
+        cv2.putText(combo, f"W ts(ns)={tw}", (10, 25),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
+        cv2.putText(combo, f"E ts(ns)={te}  dt={dt_ms:+.2f}ms", (10, 50),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
+        status_text = f"REC={'ON' if self.rec_var.get() else 'OFF'}"
+        if self.camera_backend.name != "mjpeg":
+            status_text += f" IR={'ON' if self.ir_var.get() else 'OFF'} B={int(self.brightness_var.get())}"
+        cv2.putText(combo, status_text, (10, 75),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
+        return combo
+
     # ---------- Main tick ----------
     def tick(self):
         # process serial events
@@ -734,43 +799,24 @@ class App:
         with self.eye_lock:
             eye_items = list(self.eye_q)
 
-        if world_item and eye_items:
+        if self.single_stream_preview and world_item:
+            tw, fw = world_item
+            combo = self._build_single_stream_preview(tw, fw)
+
+            cv2.imshow("World | Eye", combo)
+            self._record_preview_frame(combo, tw, tw, 0.0)
+
+        elif world_item and eye_items:
             tw, fw = world_item
             te, fe = min(eye_items, key=lambda x: abs(x[0] - tw))
             dt_ms = (tw - te) / 1e6
 
-            fw_disp = cv2.resize(fw, (WORLD_DISPLAY_WIDTH, WORLD_DISPLAY_HEIGHT), interpolation=cv2.INTER_CUBIC)
-            fe_disp = cv2.resize(fe, (EYE_DISPLAY_WIDTH, EYE_DISPLAY_HEIGHT), interpolation=cv2.INTER_CUBIC)
-            fe_disp = cv2.copyMakeBorder(
-                fe_disp,
-                EYE_PAD_TOP,
-                EYE_PAD_BOTTOM,
-                0,
-                0,
-                cv2.BORDER_CONSTANT,
-            )
-            combo = cv2.hconcat([fw_disp, fe_disp])
-
-            cv2.putText(combo, f"W ts(ns)={tw}", (10, 25),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
-            cv2.putText(combo, f"E ts(ns)={te}  dt={dt_ms:+.2f}ms", (10, 50),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
-            cv2.putText(combo,
-                        f"REC={'ON' if self.rec_var.get() else 'OFF'} IR={'ON' if self.ir_var.get() else 'OFF'} B={int(self.brightness_var.get())}",
-                        (10, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
+            combo = self._build_dual_preview(tw, fw, te, fe, dt_ms)
 
             cv2.imshow("World | Eye", combo)
-
-            if self.rec_var.get():
-                self.start_recording(combo)
-                if self.writer is not None:
-                    self.writer.write(combo)
-                    if self.csv_fh is not None:
-                        self.csv_fh.write(f"{self.frame_idx},{tw},{te},{dt_ms:.4f}\n")
-                        self.frame_idx += 1
-            else:
-                if self.writer is not None:
-                    self.stop_recording()
+            self._record_preview_frame(combo, tw, te, dt_ms)
+        elif not self.rec_var.get() and self.writer is not None:
+            self.stop_recording()
 
         k = cv2.waitKey(1) & 0xFF
         if k == ord('q'):
