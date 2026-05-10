@@ -63,6 +63,34 @@ curl -X POST http://localhost:8000/capture
 Snapshots are saved under `~/poc_out/snapshots` unless `--snapshot-dir` is
 provided.
 
+Pi-side recording endpoints:
+
+```bash
+curl -X POST http://localhost:8000/record/start
+curl http://localhost:8000/record/status
+curl -X POST http://localhost:8000/record/stop
+```
+
+Recordings are saved under `~/poc_out/recordings` unless `--record-dir` is
+provided. GPIO is disabled by default. To enable a physical record button and
+LED, start the streamer with:
+
+```bash
+python3 scripts/pi_wifi_stream.py --name glasses-left --width 640 --height 480 --fps 15 --input-order bgr --enable-gpio --button-pin 17 --led-pin 27
+```
+
+Autostart template:
+
+```bash
+sudo cp systemd/smart-glasses-stream.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable smart-glasses-stream.service
+sudo systemctl start smart-glasses-stream.service
+```
+
+Edit the service first if your username, repo path, glasses name, pins, or
+stream settings differ.
+
 If red and blue look swapped in the browser, restart the stream with:
 
 ```bash
@@ -92,6 +120,9 @@ Click `Find Glasses`, choose the right named Pi device, and click
 
 Click `Snapshot` in MJPEG mode to save the latest frame on the Pi and display
 the returned filename/path in the status line.
+
+Click `Record` in MJPEG mode to call the Pi `/record/start` and `/record/stop`
+endpoints. OpenCV/local USB mode still records locally in the GUI.
 
 Manual connection still works:
 

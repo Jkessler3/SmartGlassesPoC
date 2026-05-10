@@ -59,6 +59,8 @@ SSH/WiFi camera preview from the Pi:
 - `python3 scripts/pi_wifi_stream.py --name glasses-left --width 640 --height 480 --fps 15`
 - If colors look swapped: `python3 scripts/pi_wifi_stream.py --width 640 --height 480 --fps 15 --input-order bgr`
 - Snapshots from the Windows GUI are saved on the Pi under `~/poc_out/snapshots` by default.
+- Recordings from the Windows GUI are saved on the Pi under `~/poc_out/recordings` by default.
+- GPIO button/LED are disabled unless the streamer is started with `--enable-gpio`.
 - Open `http://<pi-ip-address>:8000` on the Windows PC.
 
 Windows GUI using the Pi WiFi stream:
@@ -66,6 +68,7 @@ Windows GUI using the Pi WiFi stream:
 - Run `python dual_cam_gui_safe.py --camera-backend mjpeg`
 - Click `Find Glasses`, pick the right Pi device, then click `Connect Stream`.
 - Click `Snapshot` to save the latest Pi frame and show the saved path.
+- Click `Record` to start/stop Pi-side recording.
 - Or run `python dual_cam_gui_safe.py --camera-backend mjpeg --world-url http://<pi-ip-address>:8000/stream.mjpg`
 - With one Pi camera, the app uses the same stream for world and eye until a second `--eye-url` is provided.
 

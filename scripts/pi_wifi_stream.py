@@ -13,7 +13,7 @@ import cv2
 
 class FrameStore:
     def __init__(self):
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._jpeg = None
         self._ts = 0.0
 
@@ -27,7 +27,107 @@ class FrameStore:
             return self._jpeg, self._ts
 
 
-def camera_worker(store, camera_num, width, height, fps, quality, input_order, stop_event):
+class RecordingState:
+    def __init__(self, record_dir, device_name, width, height, fps, led_setter=None):
+        self.record_dir = record_dir
+        self.device_name = device_name
+        self.width = width
+        self.height = height
+        self.fps = fps
+        self.led_setter = led_setter or (lambda _on: None)
+        self._lock = threading.RLock()
+        self._writer = None
+        self._path = None
+        self._frame_count = 0
+        self.led_setter(False)
+
+    def status(self):
+        with self._lock:
+            return {
+                "recording": self._writer is not None,
+                "path": self._path,
+                "frame_count": self._frame_count,
+            }
+
+    def start(self):
+        with self._lock:
+            if self._writer is not None:
+                return self.status()
+
+            os.makedirs(self.record_dir, exist_ok=True)
+            safe_name = safe_filename_part(self.device_name)
+            stamp = time.strftime("%Y%m%d_%H%M%S")
+            self._path = os.path.abspath(os.path.join(self.record_dir, f"{safe_name}_{stamp}.avi"))
+            fourcc = cv2.VideoWriter_fourcc(*"MJPG")
+            writer = cv2.VideoWriter(self._path, fourcc, self.fps, (self.width, self.height))
+            if not writer.isOpened():
+                self._path = None
+                raise RuntimeError("Could not open Pi recording writer")
+
+            self._writer = writer
+            self._frame_count = 0
+            self.led_setter(True)
+            return self.status()
+
+    def stop(self):
+        with self._lock:
+            if self._writer is not None:
+                self._writer.release()
+                self._writer = None
+            self.led_setter(False)
+            return self.status()
+
+    def toggle(self):
+        with self._lock:
+            recording = self._writer is not None
+        if recording:
+            return self.stop()
+        return self.start()
+
+    def write(self, frame):
+        with self._lock:
+            if self._writer is None:
+                return
+            self._writer.write(frame)
+            self._frame_count += 1
+
+
+def safe_filename_part(value):
+    return "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in value)
+
+
+class GpioControls:
+    def __init__(self, enabled, button_pin, led_pin, toggle_callback):
+        self.enabled = enabled
+        self.button = None
+        self.led = None
+        if not enabled:
+            return
+
+        from gpiozero import Button, LED
+
+        self.led = LED(led_pin)
+        self.led.off()
+        self.button = Button(button_pin, pull_up=True, bounce_time=0.08)
+        self.button.when_pressed = toggle_callback
+
+    def set_led(self, on):
+        if self.led is None:
+            return
+        if on:
+            self.led.on()
+        else:
+            self.led.off()
+
+    def close(self):
+        if self.led is not None:
+            self.led.off()
+            self.led.close()
+        if self.button is not None:
+            self.button.close()
+
+
+def camera_worker(store, recorder, camera_num, width, height, fps, quality, input_order, stop_event):
     from picamera2 import Picamera2
 
     picam = Picamera2(camera_num=camera_num)
@@ -51,6 +151,7 @@ def camera_worker(store, camera_num, width, height, fps, quality, input_order, s
             ok, jpeg = cv2.imencode(".jpg", frame, encode_params)
             if ok:
                 store.update(jpeg.tobytes())
+            recorder.write(frame)
 
             sleep_s = frame_interval - (time.monotonic() - t0)
             if sleep_s > 0:
@@ -66,7 +167,7 @@ def camera_worker(store, camera_num, width, height, fps, quality, input_order, s
             pass
 
 
-def make_handler(store, device_name, camera_num, width, height, fps, snapshot_dir):
+def make_handler(store, recorder, device_name, camera_num, width, height, fps, snapshot_dir, gpio_enabled):
     class StreamHandler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
             print("%s - %s" % (self.address_string(), fmt % args))
@@ -111,6 +212,11 @@ def make_handler(store, device_name, camera_num, width, height, fps, snapshot_di
                     "stream_path": "/stream.mjpg",
                     "snapshot_path": "/snapshot.jpg",
                     "capture_path": "/capture",
+                    "record_start_path": "/record/start",
+                    "record_stop_path": "/record/stop",
+                    "record_status_path": "/record/status",
+                    "recording": recorder.status(),
+                    "gpio_enabled": gpio_enabled,
                 }
                 body = json.dumps(payload, indent=2).encode("utf-8")
                 self.send_response(HTTPStatus.OK)
@@ -130,6 +236,10 @@ def make_handler(store, device_name, camera_num, width, height, fps, snapshot_di
                 self.send_header("Content-Length", str(len(jpeg)))
                 self.end_headers()
                 self.wfile.write(jpeg)
+                return
+
+            if self.path == "/record/status":
+                self._send_json({"ok": True, "recording": recorder.status()})
                 return
 
             if self.path == "/stream.mjpg":
@@ -160,6 +270,17 @@ def make_handler(store, device_name, camera_num, width, height, fps, snapshot_di
             self.send_error(HTTPStatus.NOT_FOUND)
 
         def do_POST(self):
+            if self.path == "/record/start":
+                try:
+                    self._send_json({"ok": True, "recording": recorder.start()})
+                except Exception as exc:
+                    self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+                return
+
+            if self.path == "/record/stop":
+                self._send_json({"ok": True, "recording": recorder.stop()})
+                return
+
             if self.path != "/capture":
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return
@@ -170,7 +291,7 @@ def make_handler(store, device_name, camera_num, width, height, fps, snapshot_di
                 return
 
             os.makedirs(snapshot_dir, exist_ok=True)
-            safe_name = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in device_name)
+            safe_name = safe_filename_part(device_name)
             stamp = time.strftime("%Y%m%d_%H%M%S")
             filename = f"{safe_name}_{stamp}.jpg"
             path = os.path.abspath(os.path.join(snapshot_dir, filename))
@@ -184,6 +305,9 @@ def make_handler(store, device_name, camera_num, width, height, fps, snapshot_di
                 "path": path,
                 "frame_ts": ts,
             }
+            self._send_json(payload)
+
+        def _send_json(self, payload):
             body = json.dumps(payload, indent=2).encode("utf-8")
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "application/json")
@@ -210,6 +334,14 @@ def main():
         help="Directory where POST /capture saves JPEG snapshots.",
     )
     parser.add_argument(
+        "--record-dir",
+        default=os.path.expanduser("~/poc_out/recordings"),
+        help="Directory where Pi-side recordings are saved.",
+    )
+    parser.add_argument("--enable-gpio", action="store_true", help="Enable GPIO button and LED controls.")
+    parser.add_argument("--button-pin", type=int, default=17, help="BCM GPIO pin for the record toggle button.")
+    parser.add_argument("--led-pin", type=int, default=27, help="BCM GPIO pin for the recording LED.")
+    parser.add_argument(
         "--input-order",
         choices=("rgb", "bgr"),
         default="rgb",
@@ -219,10 +351,32 @@ def main():
 
     store = FrameStore()
     stop_event = threading.Event()
+    gpio = None
+    recorder = None
+
+    def toggle_from_button():
+        if recorder is None:
+            return
+        try:
+            status = recorder.toggle()
+            print(f"GPIO record toggle: {status}")
+        except Exception as exc:
+            print(f"GPIO record toggle failed: {exc}")
+
+    gpio = GpioControls(args.enable_gpio, args.button_pin, args.led_pin, toggle_from_button)
+    recorder = RecordingState(
+        args.record_dir,
+        args.name,
+        args.width,
+        args.height,
+        args.fps,
+        led_setter=gpio.set_led,
+    )
     thread = threading.Thread(
         target=camera_worker,
         args=(
             store,
+            recorder,
             args.camera,
             args.width,
             args.height,
@@ -239,12 +393,14 @@ def main():
         (args.host, args.port),
         make_handler(
             store,
+            recorder,
             args.name,
             args.camera,
             args.width,
             args.height,
             args.fps,
             args.snapshot_dir,
+            args.enable_gpio,
         ),
     )
     print(f"Streaming {args.name} camera {args.camera} at http://{args.host}:{args.port}")
@@ -255,8 +411,10 @@ def main():
         print("\nStopping stream...")
     finally:
         stop_event.set()
+        recorder.stop()
         server.server_close()
         thread.join(timeout=2.0)
+        gpio.close()
 
 
 if __name__ == "__main__":

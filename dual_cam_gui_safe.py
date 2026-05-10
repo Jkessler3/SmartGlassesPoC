@@ -13,6 +13,7 @@ from serial.tools import list_ports
 from camera_backends import load_camera_backend
 from config import load_config
 from glasses_discovery import discover_glasses
+from pi_record import start_pi_recording, stop_pi_recording
 from pi_snapshot import capture_snapshot
 
 CAM_READ_FAIL_LIMIT = 100
@@ -626,7 +627,44 @@ class App:
 
     # ---------- Controls ----------
     def on_toggle_record(self):
+        if self.camera_backend.name == "mjpeg":
+            self.on_toggle_pi_record()
+            return
         self.set_record(not self.rec_var.get(), send_to_esp=True)
+
+    def on_toggle_pi_record(self):
+        target_on = not self.rec_var.get()
+        self.status.set("Starting Pi recording..." if target_on else "Stopping Pi recording...")
+        self.root.update_idletasks()
+
+        def worker():
+            try:
+                if target_on:
+                    result = start_pi_recording(
+                        status_url=self.current_status_url,
+                        stream_url=self.current_stream_url,
+                    )
+                else:
+                    result = stop_pi_recording(
+                        status_url=self.current_status_url,
+                        stream_url=self.current_stream_url,
+                    )
+
+                recording = bool(result.get("recording", {}).get("recording"))
+                path = result.get("recording", {}).get("path")
+                text = f"Pi recording {'started' if recording else 'stopped'}"
+                if path:
+                    text += f": {path}"
+
+                def done():
+                    self.set_record(recording, send_to_esp=False)
+                    self.status.set(text)
+
+                self.root.after(0, done)
+            except Exception as exc:
+                self.root.after(0, lambda: self.status.set(str(exc)))
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def on_toggle_ir(self):
         self.set_ir(not self.ir_var.get(), send_to_esp=True)
@@ -713,6 +751,8 @@ class App:
         self.status.set(f"Saved: {self.rec_path}")
 
     def _record_preview_frame(self, combo, tw, te, dt_ms):
+        if self.camera_backend.name == "mjpeg":
+            return
         if self.rec_var.get():
             self.start_recording(combo)
             if self.writer is not None:
@@ -830,7 +870,7 @@ class App:
             self.on_quit()
             return
         elif k == ord('r'):
-            self.set_record(not self.rec_var.get(), send_to_esp=True)
+            self.on_toggle_record()
 
         self.root.after(30, self.tick)
 
