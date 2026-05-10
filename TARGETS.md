@@ -35,6 +35,24 @@ sudo apt update
 sudo apt install -y python3-picamera2 python3-opencv python3-serial
 ```
 
+For a fresh Pi, the one-command setup path is:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Jkessler3/SmartGlassesPoC/main/scripts/setup_pi.sh | sudo bash
+```
+
+Useful setup overrides:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Jkessler3/SmartGlassesPoC/main/scripts/setup_pi.sh | sudo GLASSES_NAME=glasses-right STREAM_FPS=10 bash
+```
+
+GPIO-enabled install:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Jkessler3/SmartGlassesPoC/main/scripts/setup_pi.sh | sudo ENABLE_GPIO=1 BUTTON_PIN=17 LED_PIN=27 bash
+```
+
 Verify the camera stack before running the GUI:
 
 ```bash

@@ -37,6 +37,12 @@ Windows:
 2. Run `INSTALL.bat`.
 3. Run `RUN.bat`.
 
+Fresh Raspberry Pi OS setup:
+1. Flash Raspberry Pi OS and connect the Pi to WiFi.
+2. SSH in as `user`.
+3. Run:
+   - `curl -fsSL https://raw.githubusercontent.com/Jkessler3/SmartGlassesPoC/main/scripts/setup_pi.sh | sudo bash`
+
 Dependencies:
 - `opencv-python`
 - `numpy`
