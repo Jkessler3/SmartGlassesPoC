@@ -5,9 +5,9 @@ After=network-online.target
 
 [Service]
 Type=simple
-User=pi
-WorkingDirectory=/home/pi/SmartGlassesPoC
-ExecStart=/usr/bin/python3 /home/pi/SmartGlassesPoC/scripts/pi_wifi_stream.py --name glasses-left --width 640 --height 480 --fps 15 --input-order bgr
+User=user
+WorkingDirectory=/home/user/SmartGlassesPoC
+ExecStart=/usr/bin/python3 /home/user/SmartGlassesPoC/scripts/pi_wifi_stream.py --name glasses-left --width 640 --height 480 --fps 15 --input-order bgr
 Restart=on-failure
 RestartSec=3
 

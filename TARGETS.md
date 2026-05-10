@@ -88,7 +88,8 @@ sudo systemctl enable smart-glasses-stream.service
 sudo systemctl start smart-glasses-stream.service
 ```
 
-Edit the service first if your username, repo path, glasses name, pins, or
+The included template assumes the Pi username is `user` and the repo is at
+`/home/user/SmartGlassesPoC`. Edit it first if your glasses name, pins, or
 stream settings differ.
 
 If red and blue look swapped in the browser, restart the stream with:
