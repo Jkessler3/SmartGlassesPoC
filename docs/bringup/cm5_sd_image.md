@@ -19,6 +19,13 @@ v4l2-ctl --list-devices
 rpicam-hello --list-cameras || libcamera-hello --list-cameras || true
 ```
 
+For this build, the scene camera is connected to **CAM/DISP 0**. In Picamera2/libcamera that should appear as camera `0`, and `config/cm5.env` sets:
+
+```bash
+SCENE_CAMERA_CONNECTOR=CAM/DISP0
+SCENE_CAMERA=0
+```
+
 ## Setup
 
 ```bash
@@ -40,6 +47,7 @@ The systemd service uses headless stream mode and does not require `DISPLAY`:
 ```
 
 The headless run script loads `config/cm5.env`, creates `/home/user/poc_out`, opens scene camera `0` and eye camera `1`, and exposes the stream/status endpoints.
+At startup it logs the Picamera2 camera inventory and confirms that CAM/DISP 0 is being used as scene camera `0`.
 
 View service logs with:
 
@@ -52,6 +60,7 @@ journalctl -u smart-glasses-stream.service -f
 For CSI/libcamera cameras, set numeric camera IDs in `config/cm5.env`:
 
 ```bash
+SCENE_CAMERA_CONNECTOR=CAM/DISP0
 SCENE_CAMERA=0
 EYE_CAMERA=1
 ```

@@ -140,6 +140,43 @@ def encode_jpeg(frame, quality):
     return jpeg.tobytes()
 
 
+def log_picamera2_inventory(expected_scene_camera, expected_connector):
+    try:
+        from picamera2 import Picamera2
+    except ImportError as exc:
+        print(f"Picamera2 inventory unavailable: {exc}", file=sys.stderr, flush=True)
+        return
+
+    try:
+        infos = Picamera2.global_camera_info()
+    except Exception as exc:
+        print(f"Picamera2 inventory failed: {exc}", file=sys.stderr, flush=True)
+        return
+
+    print(f"Picamera2 detected {len(infos)} camera(s)", flush=True)
+    for idx, info in enumerate(infos):
+        print(f"  camera {idx}: {info}", flush=True)
+
+    try:
+        scene_idx = int(expected_scene_camera)
+    except (TypeError, ValueError):
+        print(
+            f"Scene camera is configured as {expected_scene_camera!r}; CAM/DISP connector validation only applies to numeric Picamera2 camera IDs.",
+            flush=True,
+        )
+        return
+
+    if scene_idx >= len(infos):
+        print(
+            f"ERROR: expected {expected_connector} to appear as Picamera2 camera {scene_idx}, but only {len(infos)} camera(s) were detected.",
+            file=sys.stderr,
+            flush=True,
+        )
+        return
+
+    print(f"Using {expected_connector} as scene camera {scene_idx}", flush=True)
+
+
 def make_handler(store, recorder, args):
     class StreamHandler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *values):
@@ -306,6 +343,7 @@ def parse_args():
     parser.add_argument("--camera-backend", default=config.camera_backend)
     parser.add_argument("--scene-camera", default=config.scene_camera)
     parser.add_argument("--eye-camera", default=config.eye_camera)
+    parser.add_argument("--scene-camera-connector", default=os.environ.get("SCENE_CAMERA_CONNECTOR", "CAM/DISP0"))
     parser.add_argument("--width", type=int, default=int(os.environ.get("STREAM_WIDTH", "640")))
     parser.add_argument("--height", type=int, default=int(os.environ.get("STREAM_HEIGHT", "480")))
     parser.add_argument("--fps", type=int, default=int(os.environ.get("STREAM_FPS", "15")))
@@ -326,9 +364,13 @@ def main():
     print("Starting Smart Glasses CM5 headless stream service", flush=True)
     print(f"profile={os.environ.get('DEVICE_PROFILE', 'cm5')}", flush=True)
     print(f"backend={args.camera_backend} scene_camera={args.scene_camera} eye_camera={args.eye_camera}", flush=True)
+    print(f"scene_camera_connector={args.scene_camera_connector}", flush=True)
     print(f"snapshots={args.snapshot_dir} recordings={args.record_dir}", flush=True)
 
     backend = load_camera_backend(args.camera_backend)
+    if args.camera_backend == "picamera2":
+        log_picamera2_inventory(args.scene_camera, args.scene_camera_connector)
+
     scene_cap = backend.open_cam(args.scene_camera)
     if scene_cap is None:
         print(f"ERROR: failed to open scene camera {args.scene_camera}", file=sys.stderr, flush=True)
