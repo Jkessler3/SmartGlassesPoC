@@ -7,13 +7,22 @@ import numpy as np
 name = "opencv"
 
 
-def open_cam(idx: int):
-    if platform.system().lower() == "windows":
-        cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
+def parse_device(device):
+    if isinstance(device, str):
+        device = device.strip()
+        if device.isdigit():
+            return int(device)
+    return device
+
+
+def open_cam(idx):
+    device = parse_device(idx)
+    if isinstance(device, int) and platform.system().lower() == "windows":
+        cap = cv2.VideoCapture(device, cv2.CAP_DSHOW)
         if cap is not None and cap.isOpened():
             return cap
 
-    cap = cv2.VideoCapture(idx)
+    cap = cv2.VideoCapture(device)
     if cap is None or not cap.isOpened():
         return None
     return cap

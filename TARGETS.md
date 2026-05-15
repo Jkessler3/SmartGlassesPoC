@@ -166,9 +166,21 @@ Plain SSH usually does not provide a display for Tkinter/OpenCV windows. Use
 VNC, a directly attached desktop, or X forwarding for the GUI. The smoke test
 above is the preferred first step over SSH.
 
-### Compute Module 5
+### Raspberry Pi Compute Module 5 Lite
 
-Use CM5 as the final embedded target. The CM5 IO path should validate:
+Use CM5 Lite, 2GB RAM, as the higher-performance embedded prototype target.
+CM5 Lite has no eMMC, so this target boots from microSD. Raspberry Pi OS
+64-bit is acceptable for bring-up, and the modern boot config path is
+`/boot/firmware/config.txt`.
+
+Use the target-specific setup and run path:
+
+```bash
+sudo ./scripts/setup_cm5.sh
+./scripts/run_cm5.sh
+```
+
+The CM5 IO path should validate:
 
 - two CSI cameras
 - RGB/world camera plus mono/global-shutter eye camera
@@ -191,6 +203,8 @@ Environment variables are also supported:
 ```bash
 SMARTGLASSES_CAMERA_BACKEND=picamera2
 SMARTGLASSES_OUTDIR=~/poc_out
+SCENE_CAMERA=0
+EYE_CAMERA=1
 ```
 
 ## Next Engineering Steps

@@ -148,8 +148,8 @@ class App:
         self.root.title("Smart Glasses PoC (GUI + Dual Cam)")
 
         # Tk state
-        self.world_idx = tk.IntVar(value=0)
-        self.eye_idx = tk.IntVar(value=1)
+        self.world_idx = tk.StringVar(value=str(config.scene_camera))
+        self.eye_idx = tk.StringVar(value=str(config.eye_camera))
         self.port_var = tk.StringVar(value="")
         self.pi_host_var = tk.StringVar(value="")
         self.glasses_var = tk.StringVar(value="")
@@ -547,8 +547,10 @@ class App:
             and hasattr(self.camera_backend, "stream_count")
             and self.camera_backend.stream_count() == 1
         )
-        capW = self.camera_backend.open_cam(self.world_idx.get())
-        capE = None if is_single_mjpeg else self.camera_backend.open_cam(self.eye_idx.get())
+        world_source = self.world_idx.get()
+        eye_source = self.eye_idx.get()
+        capW = self.camera_backend.open_cam(world_source)
+        capE = None if is_single_mjpeg else self.camera_backend.open_cam(eye_source)
         if capW is None or (not is_single_mjpeg and capE is None):
             try:
                 if capW is not None:
@@ -557,7 +559,12 @@ class App:
                     capE.release()
             except Exception:
                 pass
-            self.status.set("Failed to open cameras. Scan/apply again.")
+            if capW is None and (not is_single_mjpeg and capE is None):
+                self.status.set(f"Failed to open scene camera {world_source} and eye camera {eye_source}.")
+            elif capW is None:
+                self.status.set(f"Failed to open scene camera {world_source}.")
+            else:
+                self.status.set(f"Failed to open eye camera {eye_source}.")
             return False
 
         self.camera_backend.try_mode(capW, WORLD_CAPTURE_WIDTH, WORLD_CAPTURE_HEIGHT, WORLD_CAPTURE_FPS)

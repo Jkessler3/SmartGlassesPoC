@@ -22,7 +22,7 @@ def assert_available():
 
 
 class PiCameraSource:
-    def __init__(self, idx: int):
+    def __init__(self, idx):
         Picamera2 = _picamera2()
         self.idx = int(idx)
         self.picam = Picamera2(camera_num=self.idx)
@@ -74,9 +74,11 @@ class PiCameraSource:
         self.started = False
 
 
-def open_cam(idx: int):
+def open_cam(idx):
     try:
         return PiCameraSource(idx)
+    except (TypeError, ValueError):
+        return None
     except Exception:
         return None
 

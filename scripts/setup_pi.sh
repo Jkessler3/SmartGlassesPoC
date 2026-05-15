@@ -11,8 +11,8 @@ STREAM_HEIGHT="${STREAM_HEIGHT:-480}"
 STREAM_FPS="${STREAM_FPS:-15}"
 INPUT_ORDER="${INPUT_ORDER:-bgr}"
 ENABLE_GPIO="${ENABLE_GPIO:-0}"
-BUTTON_PIN="${BUTTON_PIN:-17}"
-LED_PIN="${LED_PIN:-27}"
+BUTTON_PIN="${BUTTON_PIN:-${BUTTON_GPIO:-17}}"
+LED_PIN="${LED_PIN:-${STATUS_LED_GPIO:-27}}"
 
 if [[ "$(id -u)" -ne 0 ]]; then
   echo "Run with sudo:"
@@ -30,11 +30,19 @@ apt-get update
 apt-get install -y \
   git \
   curl \
+  v4l-utils \
+  libcamera-apps \
+  i2c-tools \
+  gpiod \
   python3-picamera2 \
   python3-opencv \
   python3-serial \
   python3-tk \
   python3-gpiozero
+
+if apt-cache show python3-lgpio >/dev/null 2>&1; then
+  apt-get install -y python3-lgpio
+fi
 
 echo "Installing repo into ${INSTALL_DIR}..."
 if [[ -d "${INSTALL_DIR}/.git" ]]; then

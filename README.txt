@@ -1,11 +1,17 @@
 # Smart Glasses PoC - Dual Camera + ESP32 Record/IR Control
 
-This repository contains a Windows-first proof of concept for:
+This repository contains a proof of concept for:
 - Capturing and displaying two synchronized video feeds on a PC
 - A simple GUI with Record, IR, Brightness, camera scan/apply, and ESP32 connect/disconnect
 - An ESP32-S3 controller with a physical record button, IR illumination control, and a red REC indicator LED
 
 This is an engineering prototype focused on data capture and control flow, not industrial design.
+
+## Supported Targets
+
+- Raspberry Pi Zero 2 W: original wearable prototype target
+- Raspberry Pi CM5 Lite, 2GB RAM: new higher-performance prototype target booting Raspberry Pi OS 64-bit from microSD
+- Windows PC: development and bench-testing workflow with UVC cameras and ESP32 serial control
 
 ## Hardware
 
@@ -43,6 +49,10 @@ Fresh Raspberry Pi OS setup:
 3. Run:
    - `curl -fsSL https://raw.githubusercontent.com/Jkessler3/SmartGlassesPoC/main/scripts/setup_pi.sh | sudo bash`
 
+Target-specific setup scripts are also available after cloning:
+- Pi Zero 2 W: `sudo ./scripts/setup_pi_zero_2w.sh`
+- CM5 Lite: `sudo ./scripts/setup_cm5.sh`
+
 Dependencies:
 - `opencv-python`
 - `numpy`
@@ -61,6 +71,10 @@ Windows/OpenCV can also be launched directly:
 Raspberry Pi OS Bookworm/Picamera2 launch:
 - `python3 dual_cam_gui_safe.py --camera-backend picamera2 --outdir ~/poc_out`
 
+Target profile launch:
+- Pi Zero 2 W: `./scripts/run_pi_zero_2w.sh`
+- CM5 Lite: `./scripts/run_cm5.sh`
+
 SSH/WiFi camera preview from the Pi:
 - `python3 scripts/pi_wifi_stream.py --name glasses-left --width 640 --height 480 --fps 15`
 - If colors look swapped: `python3 scripts/pi_wifi_stream.py --width 640 --height 480 --fps 15 --input-order bgr`
@@ -78,7 +92,7 @@ Windows GUI using the Pi WiFi stream:
 - Or run `python dual_cam_gui_safe.py --camera-backend mjpeg --world-url http://<pi-ip-address>:8000/stream.mjpg`
 - With one Pi camera, the app uses the same stream for world and eye until a second `--eye-url` is provided.
 
-See `TARGETS.md` for the Pi Zero 2 W and CM5 target plan.
+See `TARGETS.md`, `docs/bringup/pi_zero_2w.md`, and `docs/bringup/cm5_sd_image.md` for target-specific bring-up.
 
 In the GUI:
 - `Scan Cameras` pauses capture, scans available cameras, auto-picks world and eye, then reopens capture.
