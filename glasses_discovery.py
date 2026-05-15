@@ -58,14 +58,14 @@ def candidate_hosts():
 
 
 def probe_glasses(host, port=8000, timeout=0.25):
-    status_url = f"http://{host}:{port}/status.json"
+    status_url = f"http://{host}:{port}/status"
     try:
         with urlopen(status_url, timeout=timeout) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except (OSError, URLError, json.JSONDecodeError, TimeoutError):
         return None
 
-    if payload.get("service") != "smart-glasses-pi-stream":
+    if payload.get("service") not in ("smart-glasses-pi-stream", "smart-glasses-cm5-stream"):
         return None
 
     stream_path = payload.get("stream_path") or "/stream.mjpg"

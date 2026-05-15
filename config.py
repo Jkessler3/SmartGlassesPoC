@@ -11,8 +11,29 @@ class AppConfig:
     outdir: str
     world_url: str
     eye_url: str
+    status_url: str
     scene_camera: str
     eye_camera: str
+
+
+def build_pi_url(path):
+    stream_url = os.environ.get("STREAM_URL", "")
+    if stream_url and path == "/stream.mjpg":
+        return stream_url
+
+    status_url = os.environ.get("STATUS_URL", "")
+    if status_url and path == "/status":
+        return status_url
+
+    host = os.environ.get("PI_HOST", "")
+    port = os.environ.get("PI_PORT", "8000")
+    if not host:
+        return ""
+    if host.startswith("http://") or host.startswith("https://"):
+        base = host.rstrip("/")
+    else:
+        base = f"http://{host}:{port}"
+    return f"{base}{path}"
 
 
 def load_env_file(path):
@@ -52,13 +73,18 @@ def load_config(argv=None):
     )
     parser.add_argument(
         "--world-url",
-        default=os.environ.get("SMARTGLASSES_WORLD_URL", ""),
+        default=os.environ.get("SMARTGLASSES_WORLD_URL", build_pi_url("/stream.mjpg")),
         help="MJPEG/HTTP stream URL for the world camera backend.",
     )
     parser.add_argument(
         "--eye-url",
         default=os.environ.get("SMARTGLASSES_EYE_URL", ""),
         help="Optional MJPEG/HTTP stream URL for the eye camera backend.",
+    )
+    parser.add_argument(
+        "--status-url",
+        default=os.environ.get("SMARTGLASSES_STATUS_URL", build_pi_url("/status")),
+        help="HTTP status URL for Pi stream control endpoints.",
     )
     parser.add_argument(
         "--scene-camera",
@@ -76,6 +102,7 @@ def load_config(argv=None):
         outdir=args.outdir,
         world_url=args.world_url,
         eye_url=args.eye_url,
+        status_url=args.status_url,
         scene_camera=args.scene_camera,
         eye_camera=args.eye_camera,
     )

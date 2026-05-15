@@ -3,6 +3,7 @@ import argparse
 import json
 import os
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -116,8 +117,20 @@ def read_worker(label, cap, update_fn, stop_event):
 
 def build_combo(scene_item, eye_item, width, height):
     scene_ts, scene = scene_item
-    eye_ts, eye = eye_item
     scene_disp = cv2.resize(scene, (width, height), interpolation=cv2.INTER_CUBIC)
+    if eye_item is None:
+        cv2.putText(
+            scene_disp,
+            f"scene={scene_ts}",
+            (10, 25),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            (255, 255, 255),
+            2,
+        )
+        return scene_disp
+
+    eye_ts, eye = eye_item
     eye_disp = cv2.resize(eye, (width, height), interpolation=cv2.INTER_CUBIC)
     combo = cv2.hconcat([scene_disp, eye_disp])
     dt_ms = (scene_ts - eye_ts) / 1e6
@@ -138,6 +151,29 @@ def encode_jpeg(frame, quality):
     if not ok:
         raise RuntimeError("JPEG encode failed")
     return jpeg.tobytes()
+
+
+def local_lan_ips():
+    ips = []
+    try:
+        output = subprocess.check_output(["hostname", "-I"], text=True, timeout=2)
+        ips.extend(output.split())
+    except Exception:
+        pass
+
+    try:
+        ips.extend(socket.gethostbyname_ex(socket.gethostname())[2])
+    except OSError:
+        pass
+
+    seen = set()
+    result = []
+    for ip in ips:
+        if ip.startswith("127.") or ip in seen:
+            continue
+        seen.add(ip)
+        result.append(ip)
+    return result
 
 
 def log_picamera2_inventory(expected_scene_camera, expected_connector):
@@ -178,7 +214,7 @@ def log_picamera2_inventory(expected_scene_camera, expected_connector):
     return infos
 
 
-def make_handler(store, recorder, args):
+def make_handler(store, recorder, args, camera_count):
     class StreamHandler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *values):
             print("%s - %s" % (self.address_string(), fmt % values), flush=True)
@@ -188,18 +224,39 @@ def make_handler(store, recorder, args):
                 self._send_html()
                 return
 
-            if self.path == "/status.json":
+            if self.path in ("/status", "/status.json"):
                 scene, eye = store.latest()
                 payload = {
+                    "running": True,
                     "service": "smart-glasses-cm5-stream",
+                    "profile": os.environ.get("DEVICE_PROFILE", "cm5"),
                     "name": args.name,
                     "hostname": socket.gethostname(),
                     "backend": args.camera_backend,
+                    "detected_camera_count": camera_count,
+                    "width": args.width,
+                    "height": args.height,
+                    "fps": args.fps,
+                    "host": args.host,
+                    "port": args.port,
                     "scene_camera": args.scene_camera,
-                    "eye_camera": args.eye_camera,
+                    "scene_camera_index": args.scene_camera,
+                    "eye_camera_enabled": args.enable_eye_camera,
+                    "eye_camera": args.eye_camera if args.enable_eye_camera else "",
                     "has_scene_frame": scene is not None,
                     "has_eye_frame": eye is not None,
+                    "paths": {
+                        "stream": "/stream.mjpg",
+                        "status": "/status",
+                        "status_json": "/status.json",
+                        "snapshot": "/snapshot.jpg",
+                        "capture": "/capture",
+                        "record_start": "/record/start",
+                        "record_stop": "/record/stop",
+                        "record_status": "/record/status",
+                    },
                     "stream_path": "/stream.mjpg",
+                    "status_path": "/status",
                     "snapshot_path": "/snapshot.jpg",
                     "capture_path": "/capture",
                     "record_start_path": "/record/start",
@@ -231,8 +288,8 @@ def make_handler(store, recorder, args):
 
             if self.path == "/record/start":
                 scene, eye = store.latest()
-                if scene is None or eye is None:
-                    self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, "Both cameras must have frames before recording")
+                if scene is None or (args.enable_eye_camera and eye is None):
+                    self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, "Required camera frames are not ready")
                     return
                 combo = build_combo(scene, eye, args.width, args.height)
                 try:
@@ -272,8 +329,8 @@ def make_handler(store, recorder, args):
 
         def _send_snapshot(self, save):
             scene, eye = store.latest()
-            if scene is None or eye is None:
-                self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, "No dual camera frame yet")
+            if scene is None or (args.enable_eye_camera and eye is None):
+                self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, "No required camera frame yet")
                 return
 
             combo = build_combo(scene, eye, args.width, args.height)
@@ -305,7 +362,7 @@ def make_handler(store, recorder, args):
             last_scene_ts = None
             while True:
                 scene, eye = store.latest()
-                if scene is None or eye is None or scene[0] == last_scene_ts:
+                if scene is None or (args.enable_eye_camera and eye is None) or scene[0] == last_scene_ts:
                     time.sleep(0.02)
                     continue
                 last_scene_ts = scene[0]
@@ -344,6 +401,11 @@ def parse_args():
     parser.add_argument("--camera-backend", default=config.camera_backend)
     parser.add_argument("--scene-camera", default=config.scene_camera)
     parser.add_argument("--eye-camera", default=config.eye_camera)
+    parser.add_argument(
+        "--enable-eye-camera",
+        default=os.environ.get("ENABLE_EYE_CAMERA", "1").strip().lower() in ("1", "true", "yes"),
+        action=argparse.BooleanOptionalAction,
+    )
     parser.add_argument("--scene-camera-connector", default=os.environ.get("SCENE_CAMERA_CONNECTOR", "CAM/DISP0"))
     parser.add_argument("--width", type=int, default=int(os.environ.get("STREAM_WIDTH", "640")))
     parser.add_argument("--height", type=int, default=int(os.environ.get("STREAM_HEIGHT", "480")))
@@ -364,13 +426,19 @@ def main():
     args = parse_args()
     print("Starting Smart Glasses CM5 headless stream service", flush=True)
     print(f"profile={os.environ.get('DEVICE_PROFILE', 'cm5')}", flush=True)
-    print(f"backend={args.camera_backend} scene_camera={args.scene_camera} eye_camera={args.eye_camera}", flush=True)
+    print(
+        f"backend={args.camera_backend} scene_camera={args.scene_camera} eye_camera={'enabled:' + str(args.eye_camera) if args.enable_eye_camera else 'disabled'}",
+        flush=True,
+    )
     print(f"scene_camera_connector={args.scene_camera_connector}", flush=True)
     print(f"snapshots={args.snapshot_dir} recordings={args.record_dir}", flush=True)
 
     backend = load_camera_backend(args.camera_backend)
+    camera_count = None
     if args.camera_backend == "picamera2":
         camera_infos = log_picamera2_inventory(args.scene_camera, args.scene_camera_connector)
+        if camera_infos is not None:
+            camera_count = len(camera_infos)
         if camera_infos == []:
             print(
                 "No Picamera2/libcamera cameras detected. Run scripts/debug_cm5_cameras.sh and verify CSI overlay/cable.",
@@ -384,27 +452,40 @@ def main():
         print(f"ERROR: failed to open scene camera {args.scene_camera}", file=sys.stderr, flush=True)
         return 2
 
-    eye_cap = backend.open_cam(args.eye_camera)
-    if eye_cap is None:
-        print(f"ERROR: failed to open eye camera {args.eye_camera}", file=sys.stderr, flush=True)
-        scene_cap.release()
-        return 2
+    eye_cap = None
+    if args.enable_eye_camera:
+        eye_cap = backend.open_cam(args.eye_camera)
+        if eye_cap is None:
+            print(f"ERROR: failed to open eye camera {args.eye_camera}", file=sys.stderr, flush=True)
+            scene_cap.release()
+            return 2
 
     backend.try_mode(scene_cap, args.width, args.height, args.fps)
-    backend.try_mode(eye_cap, args.width, args.height, args.fps)
+    if eye_cap is not None:
+        backend.try_mode(eye_cap, args.width, args.height, args.fps)
 
     store = FrameStore()
     recorder = RecordingState(args.record_dir, args.fps)
     stop_event = threading.Event()
     workers = [
         threading.Thread(target=read_worker, args=("scene", scene_cap, store.update_scene, stop_event), daemon=True),
-        threading.Thread(target=read_worker, args=("eye", eye_cap, store.update_eye, stop_event), daemon=True),
     ]
+    if eye_cap is not None:
+        workers.append(threading.Thread(target=read_worker, args=("eye", eye_cap, store.update_eye, stop_event), daemon=True))
     for worker in workers:
         worker.start()
 
-    server = ThreadingHTTPServer((args.host, args.port), make_handler(store, recorder, args))
-    print(f"Streaming CM5 dual cameras at http://{args.host}:{args.port}", flush=True)
+    server = ThreadingHTTPServer((args.host, args.port), make_handler(store, recorder, args, camera_count))
+    lan_ips = local_lan_ips()
+    bind_host = args.host
+    print(f"Listening on {bind_host}:{args.port}", flush=True)
+    if bind_host in ("0.0.0.0", "") and lan_ips:
+        for ip in lan_ips:
+            print(f"Stream URL: http://{ip}:{args.port}/stream.mjpg", flush=True)
+            print(f"Status URL: http://{ip}:{args.port}/status", flush=True)
+    else:
+        print(f"Stream URL: http://{bind_host}:{args.port}/stream.mjpg", flush=True)
+        print(f"Status URL: http://{bind_host}:{args.port}/status", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -415,7 +496,8 @@ def main():
         server.server_close()
         for cap in (scene_cap, eye_cap):
             try:
-                cap.release()
+                if cap is not None:
+                    cap.release()
             except Exception:
                 pass
         for worker in workers:

@@ -65,6 +65,8 @@ View service logs with:
 journalctl -u smart-glasses-stream.service -f
 ```
 
+For GUI/client connection testing over LAN/Wi-Fi, see `docs/bringup/cm5_stream_gui_connection.md`.
+
 ## Camera Ordering
 
 For CSI/libcamera cameras, set numeric camera IDs in `config/cm5.env`:

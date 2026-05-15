@@ -158,7 +158,7 @@ class App:
         self.glasses_devices = []
         self.preview_label = "Pi stream"
         self.current_stream_url = config.world_url
-        self.current_status_url = ""
+        self.current_status_url = config.status_url
         self.single_stream_preview = False
         self.rec_var = tk.BooleanVar(value=False)
         self.ir_var = tk.BooleanVar(value=False)
@@ -335,7 +335,7 @@ class App:
                 break
         if not stream_url:
             stream_url = self._stream_url_from_host(host)
-            self.current_status_url = ""
+            self.current_status_url = self.config.status_url or stream_url.rsplit("/", 1)[0] + "/status"
             self.preview_label = host or stream_url
         if not stream_url:
             messagebox.showwarning("Pi Glasses", "Enter a Pi host/IP or click Find Glasses.")
