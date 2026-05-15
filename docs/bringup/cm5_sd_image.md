@@ -26,6 +26,15 @@ SCENE_CAMERA_CONNECTOR=CAM/DISP0
 SCENE_CAMERA=0
 ```
 
+If `rpicam-hello --list-cameras` reports `No cameras available!`, the problem is below the app. Stop the stream service and debug the CSI camera path first:
+
+```bash
+sudo systemctl stop smart-glasses-stream.service
+./scripts/debug_cm5_cameras.sh
+```
+
+Internal nodes such as `/dev/video19` and `/dev/video20` through `/dev/video35` are PiSP/codec devices, not the Arducam camera sensors. Do not configure the app to use those nodes.
+
 ## Setup
 
 ```bash
@@ -48,6 +57,7 @@ The systemd service uses headless stream mode and does not require `DISPLAY`:
 
 The headless run script loads `config/cm5.env`, creates `/home/user/poc_out`, opens scene camera `0` and eye camera `1`, and exposes the stream/status endpoints.
 At startup it logs the Picamera2 camera inventory and confirms that CAM/DISP 0 is being used as scene camera `0`.
+Keep the stream service stopped until `rpicam-hello --list-cameras` detects at least one camera.
 
 View service logs with:
 
@@ -60,9 +70,13 @@ journalctl -u smart-glasses-stream.service -f
 For CSI/libcamera cameras, set numeric camera IDs in `config/cm5.env`:
 
 ```bash
+# CAMERA_BACKEND=picamera2 conceptually; this repo's env key is:
+SMARTGLASSES_CAMERA_BACKEND=picamera2
 SCENE_CAMERA_CONNECTOR=CAM/DISP0
 SCENE_CAMERA=0
 EYE_CAMERA=1
 ```
 
-For USB/OpenCV testing, set `SMARTGLASSES_CAMERA_BACKEND=opencv` and use either numeric indexes or stable `/dev/video*` paths.
+Use those settings only after the CSI cameras appear in `rpicam-hello --list-cameras` or Picamera2. Do not switch this CM5 Arducam profile to OpenCV/USB mode unless explicitly testing different USB camera hardware.
+
+See `docs/bringup/cm5_csi_camera_debug.md` for overlay examples for IMX219, OV9281, IMX708, OV5647, and dual-camera CAM/DISP0 plus CAM/DISP1 bring-up.

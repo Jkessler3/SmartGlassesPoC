@@ -145,13 +145,13 @@ def log_picamera2_inventory(expected_scene_camera, expected_connector):
         from picamera2 import Picamera2
     except ImportError as exc:
         print(f"Picamera2 inventory unavailable: {exc}", file=sys.stderr, flush=True)
-        return
+        return None
 
     try:
         infos = Picamera2.global_camera_info()
     except Exception as exc:
         print(f"Picamera2 inventory failed: {exc}", file=sys.stderr, flush=True)
-        return
+        return None
 
     print(f"Picamera2 detected {len(infos)} camera(s)", flush=True)
     for idx, info in enumerate(infos):
@@ -164,7 +164,7 @@ def log_picamera2_inventory(expected_scene_camera, expected_connector):
             f"Scene camera is configured as {expected_scene_camera!r}; CAM/DISP connector validation only applies to numeric Picamera2 camera IDs.",
             flush=True,
         )
-        return
+        return infos
 
     if scene_idx >= len(infos):
         print(
@@ -172,9 +172,10 @@ def log_picamera2_inventory(expected_scene_camera, expected_connector):
             file=sys.stderr,
             flush=True,
         )
-        return
+        return infos
 
     print(f"Using {expected_connector} as scene camera {scene_idx}", flush=True)
+    return infos
 
 
 def make_handler(store, recorder, args):
@@ -369,7 +370,14 @@ def main():
 
     backend = load_camera_backend(args.camera_backend)
     if args.camera_backend == "picamera2":
-        log_picamera2_inventory(args.scene_camera, args.scene_camera_connector)
+        camera_infos = log_picamera2_inventory(args.scene_camera, args.scene_camera_connector)
+        if camera_infos == []:
+            print(
+                "No Picamera2/libcamera cameras detected. Run scripts/debug_cm5_cameras.sh and verify CSI overlay/cable.",
+                file=sys.stderr,
+                flush=True,
+            )
+            return 2
 
     scene_cap = backend.open_cam(args.scene_camera)
     if scene_cap is None:
