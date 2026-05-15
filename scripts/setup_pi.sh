@@ -13,6 +13,10 @@ INPUT_ORDER="${INPUT_ORDER:-bgr}"
 ENABLE_GPIO="${ENABLE_GPIO:-0}"
 BUTTON_PIN="${BUTTON_PIN:-${BUTTON_GPIO:-17}}"
 LED_PIN="${LED_PIN:-${STATUS_LED_GPIO:-27}}"
+if [[ -z "${SERVICE_EXEC_START:-}" && "${DEVICE_PROFILE:-}" == "cm5" ]]; then
+  SERVICE_EXEC_START="${INSTALL_DIR}/scripts/run_cm5_stream.sh"
+fi
+SERVICE_EXEC_START="${SERVICE_EXEC_START:-/usr/bin/python3 ${INSTALL_DIR}/scripts/pi_wifi_stream.py --name ${GLASSES_NAME} --width ${STREAM_WIDTH} --height ${STREAM_HEIGHT} --fps ${STREAM_FPS} --input-order ${INPUT_ORDER}}"
 
 if [[ "$(id -u)" -ne 0 ]]; then
   echo "Run with sudo:"
@@ -57,6 +61,9 @@ GPIO_ARGS=""
 if [[ "${ENABLE_GPIO}" == "1" ]]; then
   GPIO_ARGS=" --enable-gpio --button-pin ${BUTTON_PIN} --led-pin ${LED_PIN}"
 fi
+if [[ "${ENABLE_GPIO}" == "1" && "${SERVICE_EXEC_START}" == *"pi_wifi_stream.py"* ]]; then
+  SERVICE_EXEC_START="${SERVICE_EXEC_START}${GPIO_ARGS}"
+fi
 
 echo "Writing ${SERVICE_NAME}..."
 cat >"/etc/systemd/system/${SERVICE_NAME}" <<SERVICE
@@ -69,7 +76,7 @@ After=network-online.target
 Type=simple
 User=${INSTALL_USER}
 WorkingDirectory=${INSTALL_DIR}
-ExecStart=/usr/bin/python3 ${INSTALL_DIR}/scripts/pi_wifi_stream.py --name ${GLASSES_NAME} --width ${STREAM_WIDTH} --height ${STREAM_HEIGHT} --fps ${STREAM_FPS} --input-order ${INPUT_ORDER}${GPIO_ARGS}
+ExecStart=${SERVICE_EXEC_START}
 Restart=on-failure
 RestartSec=3
 

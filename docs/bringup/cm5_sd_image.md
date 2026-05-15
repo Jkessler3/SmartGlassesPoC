@@ -31,7 +31,21 @@ sudo ./scripts/setup_cm5.sh
 ./scripts/run_cm5.sh
 ```
 
-The run script loads `config/cm5.env`, creates the configured output directory, and starts the app.
+The GUI app is for desktop/manual testing only. It creates a Tkinter window and requires `DISPLAY`.
+
+The systemd service uses headless stream mode and does not require `DISPLAY`:
+
+```bash
+./scripts/run_cm5_stream.sh
+```
+
+The headless run script loads `config/cm5.env`, creates `/home/user/poc_out`, opens scene camera `0` and eye camera `1`, and exposes the stream/status endpoints.
+
+View service logs with:
+
+```bash
+journalctl -u smart-glasses-stream.service -f
+```
 
 ## Camera Ordering
 

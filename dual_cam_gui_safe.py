@@ -1,4 +1,6 @@
 import os
+import platform
+import sys
 import time
 import threading
 import queue
@@ -914,4 +916,7 @@ class App:
 
 
 if __name__ == "__main__":
+    if platform.system().lower() == "linux" and not os.environ.get("DISPLAY"):
+        print("GUI mode requires DISPLAY. Use the headless stream service for systemd.", file=sys.stderr)
+        raise SystemExit(2)
     App(load_config()).root.mainloop()
