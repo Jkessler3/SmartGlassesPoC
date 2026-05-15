@@ -7,7 +7,6 @@ if not exist ".venv\Scripts\python.exe" (
   exit /b 1
 )
 
-if not exist "out" mkdir out
-
-echo Tip: Close Arduino Serial Monitor/Plotter if ESP32 won't connect.
-".venv\Scripts\python.exe" dual_cam_gui_safe.py
+echo Starting Smart Glasses GUI in Pi discovery / WiFi stream mode.
+echo Start the Pi stream service first, then click Find Glasses.
+".venv\Scripts\python.exe" dual_cam_gui_safe.py --camera-backend mjpeg

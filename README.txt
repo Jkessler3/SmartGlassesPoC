@@ -41,7 +41,8 @@ SmartGlassesPoC/
 Windows:
 1. Install Python 3.12 or 3.13.
 2. Run `INSTALL.bat`.
-3. Run `RUN.bat`.
+3. Run `RUN.bat` for Pi discovery / WiFi stream mode.
+4. Run `RUN_USB_ESP32.bat` only for local USB camera plus ESP32 bench testing.
 
 Fresh Raspberry Pi OS setup:
 1. Flash Raspberry Pi OS and connect the Pi to WiFi.
@@ -60,10 +61,16 @@ Dependencies:
 
 ## Running
 
+Pi discovery / WiFi stream GUI:
+- Start the Pi stream service first.
+- Run `RUN.bat`.
+- Click `Find Glasses`, pick the right Pi device, then click `Connect Stream`.
+
+Local USB camera / ESP32 bench GUI:
 1. Plug in both UVC cameras.
 2. Plug in the ESP32 over USB.
 3. Close Arduino Serial Monitor and Serial Plotter if they are open.
-4. Run `RUN.bat`.
+4. Run `RUN_USB_ESP32.bat`.
 
 Windows/OpenCV can also be launched directly:
 - `python dual_cam_gui_safe.py --camera-backend opencv`
