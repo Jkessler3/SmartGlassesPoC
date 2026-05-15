@@ -24,6 +24,17 @@ For this build, the scene camera is connected to **CAM/DISP 0**. In Picamera2/li
 ```bash
 SCENE_CAMERA_CONNECTOR=CAM/DISP0
 SCENE_CAMERA=0
+EYE_CAMERA_CONNECTOR=CAM/DISP1
+ENABLE_EYE_CAMERA=1
+EYE_CAMERA=1
+```
+
+The current boot camera overlays are:
+
+```ini
+camera_auto_detect=0
+dtoverlay=imx708,cam0
+dtoverlay=ov9281,cam1
 ```
 
 If `rpicam-hello --list-cameras` reports `No cameras available!`, the problem is below the app. Stop the stream service and debug the CSI camera path first:
@@ -76,6 +87,8 @@ For CSI/libcamera cameras, set numeric camera IDs in `config/cm5.env`:
 SMARTGLASSES_CAMERA_BACKEND=picamera2
 SCENE_CAMERA_CONNECTOR=CAM/DISP0
 SCENE_CAMERA=0
+EYE_CAMERA_CONNECTOR=CAM/DISP1
+ENABLE_EYE_CAMERA=1
 EYE_CAMERA=1
 ```
 

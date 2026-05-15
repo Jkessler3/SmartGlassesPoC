@@ -2,12 +2,15 @@
 
 This guide connects the Windows GUI/client to the CM5 headless stream service over LAN/Wi-Fi.
 
-The CM5 target is Raspberry Pi Compute Module 5 Lite with a CSI Arducam UC-B47 / IMX708 on CAM/DISP0. Keep the boot camera config as:
+The CM5 target is Raspberry Pi Compute Module 5 Lite with a CSI Arducam UC-B47 / IMX708 on CAM/DISP0 and an OV9281 on CAM/DISP1. Keep the boot camera config as:
 
 ```ini
 camera_auto_detect=0
 dtoverlay=imx708,cam0
+dtoverlay=ov9281,cam1
 ```
+
+CAM/DISP1 requires both J6 jumpers fitted.
 
 ## Service Basics
 
@@ -92,6 +95,14 @@ EYE_CAMERA=
 ```
 
 With `ENABLE_EYE_CAMERA=0`, the service should start and stream the scene camera only.
+
+For normal two-camera testing, restore:
+
+```bash
+ENABLE_EYE_CAMERA=1
+EYE_CAMERA_CONNECTOR=CAM/DISP1
+EYE_CAMERA=1
+```
 
 ## GUI/Client Configuration
 

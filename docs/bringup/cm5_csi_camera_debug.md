@@ -2,7 +2,7 @@
 
 This guide is for Raspberry Pi Compute Module 5 Lite with CSI Arducam modules on Raspberry Pi OS 64-bit.
 
-The current camera is connected to **CAM/DISP 0**. CAM/DISP 0 should not require the J6 jumpers. CAM/DISP 1 requires both J6 jumpers fitted for camera/display I2C routing on the CM5 IO board.
+The scene camera is Arducam UC-B47 / IMX708 on **CAM/DISP 0**. The second eye camera is OV9281 on **CAM/DISP 1**. CAM/DISP 0 should not require the J6 jumpers. CAM/DISP 1 requires both J6 jumpers fitted for camera/display I2C routing on the CM5 IO board.
 
 Focus first on CAM/DISP 0, the sensor overlay, cable orientation, and `/boot/firmware/config.txt`. Do not point the app at `/dev/video19` or `/dev/video20` through `/dev/video35`; those are internal PiSP/codec devices, not the Arducam sensor.
 
@@ -76,7 +76,19 @@ camera_auto_detect=0
 dtoverlay=ov5647,cam0
 ```
 
-## Dual Camera Example
+## Current Dual Camera Config
+
+For the current hardware, use:
+
+```ini
+camera_auto_detect=0
+dtoverlay=imx708,cam0
+dtoverlay=ov9281,cam1
+```
+
+CAM/DISP 1 requires both J6 jumpers fitted.
+
+## Other Dual Camera Example
 
 Test one camera on CAM/DISP 0 first. Add CAM/DISP 1 only after camera 0 appears in `rpicam-hello --list-cameras`.
 
@@ -99,6 +111,8 @@ Only after cameras appear in `rpicam-hello --list-cameras`, keep the CM5 app con
 SMARTGLASSES_CAMERA_BACKEND=picamera2
 SCENE_CAMERA_CONNECTOR=CAM/DISP0
 SCENE_CAMERA=0
+EYE_CAMERA_CONNECTOR=CAM/DISP1
+ENABLE_EYE_CAMERA=1
 EYE_CAMERA=1
 ```
 

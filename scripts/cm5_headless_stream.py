@@ -241,8 +241,10 @@ def make_handler(store, recorder, args, camera_count):
                     "port": args.port,
                     "scene_camera": args.scene_camera,
                     "scene_camera_index": args.scene_camera,
+                    "scene_camera_connector": args.scene_camera_connector,
                     "eye_camera_enabled": args.enable_eye_camera,
                     "eye_camera": args.eye_camera if args.enable_eye_camera else "",
+                    "eye_camera_connector": args.eye_camera_connector if args.enable_eye_camera else "",
                     "has_scene_frame": scene is not None,
                     "has_eye_frame": eye is not None,
                     "paths": {
@@ -407,6 +409,7 @@ def parse_args():
         action=argparse.BooleanOptionalAction,
     )
     parser.add_argument("--scene-camera-connector", default=os.environ.get("SCENE_CAMERA_CONNECTOR", "CAM/DISP0"))
+    parser.add_argument("--eye-camera-connector", default=os.environ.get("EYE_CAMERA_CONNECTOR", "CAM/DISP1"))
     parser.add_argument("--width", type=int, default=int(os.environ.get("STREAM_WIDTH", "640")))
     parser.add_argument("--height", type=int, default=int(os.environ.get("STREAM_HEIGHT", "480")))
     parser.add_argument("--fps", type=int, default=int(os.environ.get("STREAM_FPS", "15")))
@@ -431,6 +434,8 @@ def main():
         flush=True,
     )
     print(f"scene_camera_connector={args.scene_camera_connector}", flush=True)
+    if args.enable_eye_camera:
+        print(f"eye_camera_connector={args.eye_camera_connector}", flush=True)
     print(f"snapshots={args.snapshot_dir} recordings={args.record_dir}", flush=True)
 
     backend = load_camera_backend(args.camera_backend)
